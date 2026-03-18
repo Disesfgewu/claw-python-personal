@@ -10,6 +10,7 @@ from claw.llm.router_client import LLMRouterClient
 from claw.agent.loop import AgentLoop
 from claw.agent.events import TextChunk, ToolCallStart, ToolCallResult, RunComplete, RunError
 from claw.core.protocol import ConnectFrame, ResponseFrame, EventFrame
+from claw.core.auth import ws_auth_middleware
 
 app = FastAPI(title="claw-python gateway")
 
@@ -43,6 +44,9 @@ async def ws_endpoint(ws: WebSocket):
         raw = await ws.receive_json()
         if raw.get("type") != "connect":
             await ws.close(code=4001)
+            return
+        token = raw.get("token", "")
+        if not await ws_auth_middleware(ws, token):
             return
 
         agent_id = raw.get("agent_id", "default")

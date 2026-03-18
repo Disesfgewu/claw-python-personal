@@ -4,7 +4,7 @@ from .registry import tool
 
 @tool(
     name="bash",
-    description="在 host 上執行 bash 指令，回傳 stdout + stderr",
+    description="執行 bash 指令。main session 在 host 執行；其他 session 在 Docker sandbox 執行。",
     parameters={
         "type": "object",
         "properties": {
@@ -20,7 +20,7 @@ from .registry import tool
         },
         "required": ["command"]
     },
-    requires_main=True,   # Phase 2 前只能在 main session 用
+    requires_main=False,   # sandbox 後開放給所有 session
 )
 async def bash_tool(command: str, timeout: int = 30) -> str:
     try:

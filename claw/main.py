@@ -1,35 +1,42 @@
 import asyncio
-import os
 import uvicorn
 from contextlib import asynccontextmanager
-from dotenv import load_dotenv
 from fastapi import FastAPI
-
-load_dotenv()
 
 from claw.core.storage import Storage
 from claw.core.queue import MessageQueue
 from claw.llm.router_client import LLMRouterClient
+from claw.core.config import get_config
+from claw.sandbox.docker_runner import get_runner
+from claw.skills.loader import load_skills
 import claw.core.gateway as gateway_module
-import claw.tools.bash  # 觸發 bash tool 的注冊
+import claw.tools.bash    # 觸發 bash tool 的注冊
+import claw.tools.search  # 觸發 search_web tool 的注冊
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    storage = Storage()
+    cfg = get_config()
+    storage = Storage(
+        db_path=cfg.storage.db_path,
+        transcript_dir=cfg.storage.transcript_dir,
+    )
     await storage.init()
 
     llm = LLMRouterClient(
-        base_url=os.getenv("LLM_ROUTER_URL", "http://127.0.0.1:8000"),
-        api_key=os.getenv("LLM_ROUTER_API_KEY", ""),
+        base_url=cfg.llm_router.url,
+        api_key=cfg.llm_router.api_key,
     )
 
     gateway_module.storage = storage
     gateway_module.queue = MessageQueue()
     gateway_module.llm = llm
+    if cfg.skills.autoload:
+        load_skills(cfg.skills.dir)
 
     yield
 
+    await get_runner().destroy_all()
     await llm.close()
 
 
@@ -37,6 +44,7 @@ gateway_module.app.router.lifespan_context = lifespan
 
 
 if __name__ == "__main__":
-    host = os.getenv("CLAW_HOST", "127.0.0.1")
-    port = int(os.getenv("CLAW_PORT", "18790"))
+    cfg = get_config()
+    host = cfg.gateway.host
+    port = cfg.gateway.port
     uvicorn.run(gateway_module.app, host=host, port=port, reload=False)

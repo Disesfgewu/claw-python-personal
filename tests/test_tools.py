@@ -6,6 +6,7 @@ from claw.tools.bash import bash_tool
 
 @pytest.mark.asyncio
 async def test_registry_and_execute():
+    saved = dict(registry._registry)
     registry._registry = {}
 
     @registry.tool(
@@ -26,10 +27,12 @@ async def test_registry_and_execute():
 
     res_unknown = await registry.execute("missing", {}, session_is_main=False)
     assert "unknown tool" in res_unknown
+    registry._registry = saved
 
 
 @pytest.mark.asyncio
 async def test_registry_requires_main():
+    saved = dict(registry._registry)
     registry._registry = {}
 
     @registry.tool(
@@ -46,6 +49,7 @@ async def test_registry_requires_main():
 
     res = await registry.execute("main_only", {}, session_is_main=False)
     assert "requires main" in res
+    registry._registry = saved
 
 
 @pytest.mark.asyncio

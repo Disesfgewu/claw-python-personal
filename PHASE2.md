@@ -896,6 +896,31 @@ get_hooks().register("after_tool_call", log_tool_call)
 - Skill 可以注冊 tools 和 hooks
 - Gating 檢查：missing binary 或 env var 時跳過 skill
 
+### Skills 架構決策（OpenClaw 相容）
+
+claw-python 的 Skills 採用與 OpenClaw 相同的 **SKILL.md 為主** 架構：
+
+- Skills 目錄（`skills/<name>/SKILL.md`）存放 **宣告式** 的 skill 定義
+- SKILL.md frontmatter 使用 `metadata.openclaw.*` 格式（與 OpenClaw 52 個 skill 相容）
+- Python built-in tools（如 `search_web`, `bash`）放在 `claw/tools/` 目錄，不在 skills 目錄
+- SKILL.md 的 body 內容透過 `before_prompt_build` hook 注入 system prompt
+
+**SKILL.md frontmatter 格式（OpenClaw 相容）：**
+```yaml
+---
+name: <skill-name>
+description: <one-line description>
+homepage: ""
+metadata:
+  openclaw:
+    emoji: <emoji>
+    requires:
+      anyBins: []   # 至少有一個即可
+      allBins: []   # 全部都要有
+    install: ""     # 安裝指令（供文件用，不自動執行）
+---
+```
+
 ---
 
 ### 目錄

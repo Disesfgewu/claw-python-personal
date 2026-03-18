@@ -52,14 +52,31 @@ def get_definitions(session_is_main: bool = False) -> list[dict]:
     return specs
 
 
-async def execute(name: str, arguments: dict, session_is_main: bool = False) -> str:
+async def execute(
+    name: str,
+    arguments: dict,
+    session_id: str = "agent:main",
+    session_is_main: bool | None = None,
+) -> str:
     """執行 tool，回傳結果字串"""
     spec = _registry.get(name)
     if spec is None:
         return f"Error: unknown tool '{name}'"
+    if session_is_main is None:
+        from claw.tools.policy import is_main_session
+        session_is_main = is_main_session(session_id)
     if spec.requires_main and not session_is_main:
         return f"Error: tool '{name}' requires main session"
     try:
+        if name == "bash":
+            from claw.sandbox.policy import needs_sandbox
+            if needs_sandbox(session_id):
+                from claw.sandbox.docker_runner import get_runner
+                command = arguments.get("command", "")
+                timeout = arguments.get("timeout")
+                result = await get_runner().run(session_id, command, timeout=timeout)
+                return str(result)
+
         result = await spec.handler(**arguments)
         return str(result)
     except Exception as e:

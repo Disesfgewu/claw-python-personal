@@ -69,9 +69,13 @@ class MessageRow:
 
 
 class Storage:
-    def __init__(self, db_path: str = DB_PATH):
+    def __init__(
+        self,
+        db_path: str = DB_PATH,
+        transcript_dir: str = TRANSCRIPT_DIR,
+    ):
         self.db_path = os.path.expanduser(db_path)
-        self.transcript_dir = TRANSCRIPT_DIR
+        self.transcript_dir = os.path.expanduser(transcript_dir)
 
     async def init(self) -> None:
         """初始化 DB，建立 tables"""

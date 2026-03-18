@@ -1,0 +1,39 @@
+# config/default.yaml
+
+gateway:
+  host: "127.0.0.1"
+  port: 18790
+  auth_token: ""           # WebSocket 連線需要帶的 token（空 = 不驗證）
+
+llm_router:
+  url: "http://127.0.0.1:8000"
+  api_key: ""              # 從 .env 覆蓋
+
+agents:
+  default:
+    system_prompt: null    # null = 用 DEFAULT_SYSTEM_PROMPT
+    queue_mode: "collect"  # collect | followup | drop
+    sandbox: false         # main agent 預設不 sandbox
+    max_tool_rounds: 8
+    prompt_tools: true     # 使用 prompt-based tool calling fallback
+
+sandbox:
+  enabled: true
+  image: "claw-sandbox:latest"
+  workspace_dir: "/workspace"
+  timeout: 60              # container 最長存活秒數
+  memory_limit: "256m"
+  cpu_period: 100000
+  cpu_quota: 50000         # 50% CPU
+
+skills:
+  dir: "skills"            # 相對於專案根目錄
+  autoload: true
+
+storage:
+  db_path: "~/.claw/claw.db"
+  transcript_dir: "~/.claw/transcripts"
+
+logging:
+  level: "INFO"            # DEBUG | INFO | WARNING | ERROR
+  format: "json"           # json | text
