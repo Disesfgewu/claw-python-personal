@@ -14,6 +14,7 @@ from claw.agent.prompt_tools import (
     build_tool_system_prompt, parse_tool_calls, strip_tool_calls,
     format_tool_result_message,
 )
+from claw.agent.hooks import get_hooks
 
 MAX_TOOL_ROUNDS = 8   # 最多幾輪 tool call，防止無限迴圈
 
@@ -42,9 +43,29 @@ class AgentLoop:
 
         is_main = is_main_session(session_id)
         sys_prompt = system_prompt or session.system_prompt or DEFAULT_SYSTEM_PROMPT
+        hooks = get_hooks()
+        sys_prompt = await hooks.fire(
+            "before_prompt_build",
+            session_id=session_id,
+            base_prompt=sys_prompt,
+        )
+        user_message = await hooks.fire(
+            "after_user_message",
+            session_id=session_id,
+            message=user_message,
+        )
 
         # 把 user message 存入 storage
+        # slash command 攔截：若是命令，直接回傳結果，不走 LLM
+        from claw.agent.commands import get_command_registry
+        cmd_result = await get_command_registry().execute(session_id, user_message, self.storage)
+        if cmd_result is not None:
+            yield TextChunk(content=cmd_result)
+            yield RunComplete(full_content=cmd_result, usage={})
+            return
+
         await self._save_message(session_id, "user", user_message)
+
         self.storage.append_transcript(session_id, {
             "ts": now_iso(), "type": "user_message", "content": user_message
         })
@@ -135,7 +156,17 @@ class AgentLoop:
                             )
 
                             result = await tool_registry.execute(
-                                pc.name, pc.arguments, session_is_main=is_main
+                                pc.name,
+                                pc.arguments,
+                                session_id=session_id,
+                                session_is_main=is_main,
+                            )
+                            result = await hooks.fire(
+                                "after_tool_call",
+                                session_id=session_id,
+                                tool_name=pc.name,
+                                arguments=pc.arguments,
+                                result=result,
                             )
                             call_results.append(result)
 
@@ -157,6 +188,11 @@ class AgentLoop:
 
                     else:
                         # 沒有 tool call，純文字回覆
+                        content_buffer = await hooks.fire(
+                            "before_send",
+                            session_id=session_id,
+                            content=content_buffer,
+                        )
                         yield TextChunk(content=content_buffer)
                         full_content += content_buffer
                         await self._save_message(session_id, "assistant", content_buffer)
@@ -169,6 +205,11 @@ class AgentLoop:
                 # --- native tool calls 處理（原有邏輯）---
                 if not tool_call_buffers:
                     # 沒有 tool call，這一輪結束
+                    content_buffer = await hooks.fire(
+                        "before_send",
+                        session_id=session_id,
+                        content=content_buffer,
+                    )
                     full_content += content_buffer
                     if use_prompt_tools:
                         pass  # 已在上面處理
@@ -216,7 +257,17 @@ class AgentLoop:
                     )
 
                     result = await tool_registry.execute(
-                        tc_name, tc_args, session_is_main=is_main
+                        tc_name,
+                        tc_args,
+                        session_id=session_id,
+                        session_is_main=is_main,
+                    )
+                    result = await hooks.fire(
+                        "after_tool_call",
+                        session_id=session_id,
+                        tool_name=tc_name,
+                        arguments=tc_args,
+                        result=result,
                     )
 
                     self.storage.append_transcript(session_id, {
@@ -242,12 +293,23 @@ class AgentLoop:
             self.storage.append_transcript(session_id, {
                 "ts": now_iso(), "type": "run_complete", "usage": usage
             })
+            await hooks.fire(
+                "on_run_complete",
+                session_id=session_id,
+                full_content=full_content,
+                usage=usage,
+            )
             yield RunComplete(full_content=full_content, usage=usage)
 
         except Exception as e:
             self.storage.append_transcript(session_id, {
                 "ts": now_iso(), "type": "run_error", "error": str(e)
             })
+            await hooks.fire(
+                "on_run_error",
+                session_id=session_id,
+                error=str(e),
+            )
             yield RunError(error=str(e))
 
     def _make_request(
