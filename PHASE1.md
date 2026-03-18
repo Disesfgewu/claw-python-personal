@@ -241,7 +241,7 @@ claw/
 | `complete()` | `POST /v1/chat/completions` | 一般對話（非 streaming） |
 | `stream()` | `POST /v1/chat/completions` + `stream: true` | Streaming 對話 |
 | `direct_query()` | `POST /v1/direct_query` | 指定 provider + model |
-| `health_check()` | `GET /admin/status` | 健康檢查 + quota 查詢 |
+| `health_check()` | `POST /v1/chat/completions` | 健康檢查（1 token ping） |
 
 ---
 
@@ -358,9 +358,17 @@ class LLMRouterClient:
 
     async def health_check(self) -> dict:
         """回傳 quota 狀態；連不上則 raise"""
-        resp = await self._client.get("/admin/status", timeout=5.0)
+        resp = await self._client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "auto",
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+            timeout=10.0,
+        )
         resp.raise_for_status()
-        return resp.json()
+        return {"status": "ok", "model": resp.json().get("model", "")}
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -438,7 +446,7 @@ class LLMRouterClient:
 - [ ] `LLMRouterClient.complete()` — POST + parse response
 - [ ] `LLMRouterClient.stream()` — SSE 解析（`data: ` 前綴、`[DONE]` 終止）
 - [ ] `LLMRouterClient.direct_query()` — 指定 model
-- [ ] `LLMRouterClient.health_check()` — GET /admin/status
+- [ ] `LLMRouterClient.health_check()` — POST /v1/chat/completions（1 token ping）
 - [ ] `LLMRouterClient.close()` — 釋放 httpx client
 - [ ] `_build_payload()` — system prompt 注入 + tools 格式轉換
 - [ ] `_parse_response()` — tool_calls JSON 解析
@@ -1443,7 +1451,7 @@ HTTP Channel 是 Phase 1 的最小可用驗證。你可以用 `curl` 直接打 G
 
 ```bash
 # 測試整個 pipeline
-curl -X POST http://127.0.0.1:18789/v1/chat/completions \
+curl -X POST http://127.0.0.1:18790/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "session_id": "agent:main",
@@ -1500,7 +1508,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "claw.core.gateway:app",
         host="127.0.0.1",
-        port=18789,
+        port=18790,
         reload=False,
     )
 ```
@@ -1600,7 +1608,7 @@ LLM_ROUTER_API_KEY=
 
 # Gateway 啟動設定
 CLAW_HOST=127.0.0.1
-CLAW_PORT=18789
+CLAW_PORT=18790
 
 # 資料目錄（預設 ~/.claw）
 CLAW_DATA_DIR=~/.claw

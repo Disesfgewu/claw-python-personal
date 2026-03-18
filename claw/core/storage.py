@@ -7,8 +7,9 @@ import aiosqlite
 import json
 import os
 
-DB_PATH = os.path.expanduser("~/.claw/claw.db")
-TRANSCRIPT_DIR = os.path.expanduser("~/.claw/transcripts")
+_data_dir = os.path.expanduser(os.getenv("CLAW_DATA_DIR", "~/.claw"))
+DB_PATH = os.path.join(_data_dir, "claw.db")
+TRANSCRIPT_DIR = os.path.join(_data_dir, "transcripts")
 
 SCHEMA_SQL = """
 -- sessions 表：每個 session 的 metadata

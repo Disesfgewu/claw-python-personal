@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
+from typing import Optional
 
 from claw.core.storage import Storage
 from claw.core.queue import MessageQueue, QueueMode
@@ -13,13 +14,20 @@ from claw.core.protocol import ConnectFrame, ResponseFrame, EventFrame
 app = FastAPI(title="claw-python gateway")
 
 # --- 依賴注入（由 main.py 設定）---
-storage: Storage = None
-queue: MessageQueue = None
-llm: LLMRouterClient = None
+storage: Optional[Storage] = None
+queue: Optional[MessageQueue] = None
+llm: Optional[LLMRouterClient] = None
+
+
+def _require_dependencies() -> tuple[Storage, MessageQueue, LLMRouterClient]:
+    if storage is None or queue is None or llm is None:
+        raise RuntimeError("gateway dependencies are not configured")
+    return storage, queue, llm
 
 
 def get_agent_loop() -> AgentLoop:
-    return AgentLoop(storage=storage, llm=llm)
+    storage_impl, _, llm_impl = _require_dependencies()
+    return AgentLoop(storage=storage_impl, llm=llm_impl)
 
 
 # --- WebSocket 控制平面 ---
@@ -27,6 +35,7 @@ def get_agent_loop() -> AgentLoop:
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
+    storage_impl, queue_impl, llm_impl = _require_dependencies()
     loop = get_agent_loop()
 
     try:
@@ -46,12 +55,12 @@ async def ws_endpoint(ws: WebSocket):
 
             # health
             if method == "health":
-                status = await llm.health_check()
+                status = await llm_impl.health_check()
                 await ws.send_json(ResponseFrame(id=frame_id, result=status).__dict__)
 
             # sessions.get
             elif method == "sessions.get":
-                session = await storage.get_session(params["session_id"])
+                session = await storage_impl.get_session(params["session_id"])
                 await ws.send_json(ResponseFrame(
                     id=frame_id,
                     result=session.__dict__ if session else None
@@ -73,7 +82,7 @@ async def ws_endpoint(ws: WebSocket):
                     last_active=now_iso(),
                     config=params.get("config", {}),
                 )
-                await storage.create_session(s)
+                await storage_impl.create_session(s)
                 await ws.send_json(ResponseFrame(id=frame_id, result="ok").__dict__)
 
             # agent.run（streaming 透過 event push）
@@ -105,7 +114,7 @@ async def ws_endpoint(ws: WebSocket):
                                 data={"session_id": sid, "error": event.error}
                             ).__dict__)
 
-                await queue.submit(session_id, user_message, run_and_push)
+                await queue_impl.submit(session_id, user_message, run_and_push)
                 await ws.send_json(ResponseFrame(id=frame_id, result="queued").__dict__)
 
             else:
@@ -134,14 +143,15 @@ async def chat_completions(body: dict):
         return {"error": "messages is empty"}
 
     user_message = messages[-1].get("content", "")
+    storage_impl, _, _ = _require_dependencies()
     loop = get_agent_loop()
 
     # 確保 session 存在
-    session = await storage.get_session(session_id)
+    session = await storage_impl.get_session(session_id)
     if session is None:
         from claw.core.storage import SessionRow
         from claw.agent.loop import now_iso
-        await storage.create_session(SessionRow(
+        await storage_impl.create_session(SessionRow(
             session_id=session_id,
             scope="main",
             channel=None,
@@ -179,7 +189,8 @@ async def chat_completions(body: dict):
 @app.get("/health")
 async def health():
     try:
-        status = await llm.health_check()
+        _, _, llm_impl = _require_dependencies()
+        status = await llm_impl.health_check()
         return {"status": "ok", "llm_router": status}
     except Exception as e:
         return {"status": "error", "error": str(e)}
