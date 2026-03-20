@@ -1,5 +1,8 @@
-from typing import AsyncIterator
+from __future__ import annotations
+
+from typing import AsyncIterator, TYPE_CHECKING
 import json
+import logging
 from datetime import datetime, timezone
 
 from claw.core.storage import Storage, MessageRow
@@ -16,7 +19,12 @@ from claw.agent.prompt_tools import (
 )
 from claw.agent.hooks import get_hooks
 
+if TYPE_CHECKING:
+    from claw.memory.manager import MemoryManager
+
 MAX_TOOL_ROUNDS = 8   # 最多幾輪 tool call，防止無限迴圈
+
+logger = logging.getLogger(__name__)
 
 
 def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
@@ -32,10 +40,17 @@ def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
 
 
 class AgentLoop:
-    def __init__(self, storage: Storage, llm: LLMRouterClient, egress=None):
+    def __init__(
+        self,
+        storage: Storage,
+        llm: LLMRouterClient,
+        egress=None,
+        memory: "MemoryManager | None" = None,
+    ):
         self.storage = storage
         self.llm = llm
         self.egress = egress  # EgressPolicy | None
+        self.memory = memory
 
     async def run(
         self,
@@ -77,6 +92,19 @@ class AgentLoop:
             yield RunComplete(full_content=cmd_result, usage={})
             return
 
+        original_user_msg = user_message
+        if self.memory:
+            try:
+                recalled = await self.memory.search(user_message, session_id=session_id, limit=3)
+                if recalled:
+                    memory_lines = "\n".join(
+                        f"[Memory {i+1}] {r['content'][:300]}"
+                        for i, r in enumerate(recalled)
+                    )
+                    user_message = f"Relevant memories:\n{memory_lines}\n\n---\n{user_message}"
+            except Exception as e:
+                logger.warning(f"Memory recall failed: {e}")
+
         await self._save_message(session_id, "user", user_message)
 
         self.storage.append_transcript(session_id, {
@@ -102,6 +130,7 @@ class AgentLoop:
             effective_sys_prompt = sys_prompt + build_tool_system_prompt(tool_def_objs)
 
         full_content = ""
+        full_response = ""
         usage = {}
 
         try:
@@ -129,6 +158,7 @@ class AgentLoop:
                         content_buffer += chunk.content
                         # prompt-based 模式：先緩衝，不即時 yield（等解析完才知道哪些是工具呼叫）
                         if not use_prompt_tools:
+                            full_response += chunk.content
                             yield TextChunk(content=chunk.content)
 
                     # native tool call delta（分段累積）
@@ -155,6 +185,7 @@ class AgentLoop:
                         # 有 tool call：把純文字部分先 yield
                         visible_text = strip_tool_calls(content_buffer)
                         if visible_text:
+                            full_response += visible_text
                             yield TextChunk(content=visible_text)
 
                         # 執行 tool calls
@@ -229,6 +260,7 @@ class AgentLoop:
                             content=content_buffer,
                         )
                         yield TextChunk(content=content_buffer)
+                        full_response += content_buffer
                         full_content += content_buffer
                         await self._save_message(session_id, "assistant", content_buffer)
                         self.storage.append_transcript(session_id, {
@@ -357,6 +389,16 @@ class AgentLoop:
                 usage=usage,
             )
             yield RunComplete(full_content=full_content, usage=usage)
+            if self.memory:
+                try:
+                    combined = f"User: {original_user_msg}\nAssistant: {full_response[:600]}"
+                    await self.memory.save(
+                        session_id=session_id,
+                        content=combined,
+                        metadata={"source": "auto", "session": session_id},
+                    )
+                except Exception as e:
+                    logger.warning(f"Memory auto-save failed: {e}")
 
         except Exception as e:
             self.storage.append_transcript(session_id, {

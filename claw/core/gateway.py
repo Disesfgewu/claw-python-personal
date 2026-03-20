@@ -28,7 +28,9 @@ def _require_dependencies() -> tuple[Storage, MessageQueue, LLMRouterClient]:
 
 def get_agent_loop() -> AgentLoop:
     storage_impl, _, llm_impl = _require_dependencies()
-    return AgentLoop(storage=storage_impl, llm=llm_impl)
+    import claw.core.gateway as _gw
+    mem = getattr(_gw, 'memory', None)
+    return AgentLoop(storage=storage_impl, llm=llm_impl, memory=mem)
 
 
 # --- WebSocket 控制平面 ---

@@ -12,6 +12,7 @@ from claw.skills.loader import load_skills
 import claw.core.gateway as gateway_module
 import claw.tools.bash    # 觸發 bash tool 的注冊
 import claw.tools.search  # 觸發 search_web tool 的注冊
+import claw.tools.memory_tools  # 觸發 memory_save / memory_search 工具注冊
 
 
 @asynccontextmanager
@@ -27,6 +28,22 @@ async def lifespan(app: FastAPI):
         base_url=cfg.llm_router.url,
         api_key=cfg.llm_router.api_key,
     )
+
+    import os
+    import claw.tools.memory_tools as _mem_tools
+    from claw.memory.sqlite_store import MemoryStore
+    from claw.memory.manager import MemoryManager
+
+    # Memory 初始化
+    mem_db_path = os.path.join(
+        os.path.dirname(os.path.expanduser(cfg.storage.db_path)),
+        "memory.db"
+    )
+    mem_store = MemoryStore(db_path=mem_db_path)
+    await mem_store.init()
+    memory_manager = MemoryManager(store=mem_store, llm=llm)
+    _mem_tools.set_memory_manager(memory_manager)
+    gateway_module.memory = memory_manager
 
     gateway_module.storage = storage
     gateway_module.queue = MessageQueue()
