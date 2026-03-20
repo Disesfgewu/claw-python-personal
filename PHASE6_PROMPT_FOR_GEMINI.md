@@ -1,36 +1,41 @@
-# Phase 6 Gemini Worker Prompt — Config + Tests
+# Phase 6 Gemini Worker Prompt — Config + Main + Tests（獨立並行）
 
 你是 claw-python 專案的 Gemini Worker Agent。
-請嚴格按照以下任務說明完成程式碼修改與測試撰寫。
-完成後回報每個 STEP 的修改摘要與測試結果。
+**此任務與 Codex 完全獨立，可並行執行，無依賴關係。**
+
+請嚴格按照以下任務說明完成程式碼修改與測試撰寫。完成後回報每個 STEP 的修改摘要與測試結果。
 
 ---
 
 ## 專案背景
 
 - **claw-python**：Python AI Agent OS，當前 Phase 5 完成（92 tests pass）
-- Phase 6 目標：Telegram + Slack channel adapters
-- 你負責：Config 管理 + Channel 測試 + Main 啟動邏輯
+- Phase 6 目標：Channel adapters（Telegram + Slack）
+- **你的獨立任務**：Config 系統 + main.py 啟動邏輯 + 整合測試框架
 
-### 已完成（Codex 負責）
+### 基礎已備
 
-- STEP 1：TelegramChannel 完整實作（polling + webhook）
-- STEP 2：SlackChannel 完整實作（Socket Mode）
+- `claw/core/config.py` — 既有 Config 系統
+- `claw/main.py` — FastAPI lifespan 啟動邏輯
+- Codex 會獨立完成 `claw/channels/telegram.py` 和 `claw/channels/slack.py`
 
-### 你的工作範圍
+### 你的工作範圍（完全獨立）
 
-- STEP 3：Config schema 擴充 + main.py 啟動邏輯
-- STEP 4：Telegram 和 Slack channel 測試（mock）
+- **STEP 1**：Config schema 擴充（TelegramConfig、SlackConfig）
+- **STEP 2**：main.py 中的 channel 啟動邏輯（使用 mock Channel 測試）
+- **STEP 3**：Config + Main 整合測試（4 tests）
+
+Codex 獨立負責 Channel 實作，與你的工作完全無關。
 
 ---
 
-## STEP 3 — Config 管理 + Main 啟動
-
-### 3a. Config Schema 擴充
+## STEP 1 — Config Schema 擴充
 
 **檔案**：`claw/core/config.py`
 
-在現有 Config dataclass 中增加：
+### 規格
+
+在現有 `Config` dataclass 中增加兩個新欄位：
 
 ```python
 from dataclasses import dataclass, field
@@ -50,16 +55,19 @@ class SlackConfig:
 @dataclass
 class Config:
     # ... existing fields ...
+
+    # 新增以下兩行
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
 ```
 
-YAML 範例（在 docstring 或 config.yaml.example）：
+### YAML 範例（在 docstring 或 README 中註記）
 
 ```yaml
+# config.yaml
 telegram:
   enabled: false
-  token: "your_bot_token_here"
+  token: "your_bot_token"
   polling: true
 
 slack:
@@ -68,23 +76,28 @@ slack:
   app_token: "xapp-..."
 ```
 
-### 3b. Main.py 啟動邏輯
+### 驗證要點
+
+- Config 無 channel 配置時，使用預設值（enabled=False）
+- Config 從 YAML 讀取時，正確解析 telegram/slack 段
+- 不存在 YAML 時，用預設值
+
+---
+
+## STEP 2 — main.py 啟動邏輯
 
 **檔案**：`claw/main.py`
 
-在 `lifespan()` 中，於 `gateway_module` 初始化後加入：
+### 規格
+
+在 `lifespan()` 函數中，於 storage/llm/memory 初始化後加入：
 
 ```python
-import asyncio
-from claw.core.config import get_config
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    cfg = get_config()
-
     # ... existing storage, llm, memory init ...
 
-    # Start channels
+    # 新增 channel 啟動邏輯
     channels = []
 
     if cfg.telegram.enabled:
@@ -117,7 +130,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Cleanup
+    # Cleanup: 優雅停止所有 channels
     for channel in channels:
         try:
             await channel.stop()
@@ -127,213 +140,27 @@ async def lifespan(app: FastAPI):
     # ... existing cleanup ...
 ```
 
-**注意**：
-- channel 啟動順序無關（並行可行）
+### 關鍵點
+
 - 啟動失敗不應中斷整體流程（try/except 包裝）
-- 需在 yield 後優雅停止 channels
+- channel 列表用於 cleanup
+- Cleanup 應在 yield 後執行
+- Import 放在 try 內（package 可能未裝）
+- logger 用 logging（不是 print）
 
 ---
 
-## STEP 4 — Channel 測試
+## STEP 3 — Config + Main 整合測試
 
-### 4a. Telegram 測試
-
-**檔案**：`tests/test_telegram.py`（已在 git status，需擴充）
-
-```python
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from claw.channels.telegram import TelegramChannel
-import telegram
-
-
-@pytest.mark.asyncio
-async def test_telegram_private_message_session_id():
-    """Private message should generate agent:tg:user:{id} session_id"""
-    channel = TelegramChannel(token="test_token")
-
-    # Mock update
-    mock_update = MagicMock(spec=telegram.Update)
-    mock_update.message.chat.type = "private"
-    mock_update.message.from_user.id = 12345
-
-    session_id = channel._get_session_id(mock_update)
-    assert session_id == "agent:tg:user:12345"
-
-
-@pytest.mark.asyncio
-async def test_telegram_group_message_session_id():
-    """Group message should generate agent:tg:group:{id} session_id"""
-    channel = TelegramChannel(token="test_token")
-
-    mock_update = MagicMock(spec=telegram.Update)
-    mock_update.message.chat.type = "group"
-    mock_update.message.chat.id = 67890
-
-    session_id = channel._get_session_id(mock_update)
-    assert session_id == "agent:tg:group:67890"
-
-
-@pytest.mark.asyncio
-async def test_telegram_on_message_posts_to_gateway():
-    """on_message should POST to gateway with correct payload"""
-    channel = TelegramChannel(token="test_token", base_url="http://test:8000")
-
-    # Mock bot and httpx
-    channel.bot = AsyncMock()
-    mock_response = AsyncMock()
-
-    # Mock SSE stream
-    async def mock_stream(*args, **kwargs):
-        lines = [
-            'data: {"choices": [{"delta": {"content": "Hello"}}]}',
-            'data: {"choices": [{"delta": {"content": " world"}}]}',
-        ]
-        for line in lines:
-            yield line
-
-    mock_response.aiter_lines = mock_stream
-
-    with patch("httpx.AsyncClient.stream") as mock_client:
-        mock_client.return_value.__aenter__.return_value = mock_response
-
-        mock_update = MagicMock(spec=telegram.Update)
-        mock_update.message.text = "Test message"
-        mock_update.message.chat.type = "private"
-        mock_update.message.from_user.id = 123
-
-        mock_context = MagicMock()
-
-        await channel.on_message(mock_update, mock_context)
-
-        # Verify POST was called with correct payload
-        mock_client.assert_called_once()
-        call_args = mock_client.call_args
-        assert call_args[0][0] == "POST"
-        assert "http://test:8000/v1/chat/completions" in call_args[0][1]
-
-        json_body = call_args[1]["json"]
-        assert json_body["session_id"] == "agent:tg:user:123"
-        assert json_body["messages"][0]["content"] == "Test message"
-
-
-@pytest.mark.asyncio
-async def test_telegram_send_response_with_throttle():
-    """send_response should throttle messages"""
-    channel = TelegramChannel(token="test_token")
-    channel.bot = AsyncMock()
-
-    long_text = "x" * 10000  # 10k chars, will split
-
-    import time
-    start = time.time()
-    await channel._send_response(123, long_text)
-    elapsed = time.time() - start
-
-    # Should have called send_message 3 times (10000 / 4096 + 1)
-    assert channel.bot.send_message.call_count == 3
-    # Should have throttled (0.5s each time)
-    assert elapsed >= 1.0  # 3 messages * 0.5s throttle
-```
-
-### 4b. Slack 測試
-
-**檔案**：`tests/test_slack.py`（已在 git status，需擴充）
-
-```python
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from claw.channels.slack import SlackChannel
-
-
-@pytest.mark.asyncio
-async def test_slack_dm_session_id():
-    """Direct message should generate agent:slack:dm:{user_id} session_id"""
-    channel = SlackChannel(bot_token="test_bot", app_token="test_app")
-
-    event = {
-        "channel": "D123456",  # DM channels start with D
-        "user": "U789",
-    }
-
-    session_id = channel._get_session_id(event)
-    assert session_id == "agent:slack:dm:U789"
-
-
-@pytest.mark.asyncio
-async def test_slack_channel_mention_session_id():
-    """Channel mention should generate agent:slack:channel:{channel_id} session_id"""
-    channel = SlackChannel(bot_token="test_bot", app_token="test_app")
-
-    event = {
-        "channel": "C123456",  # Channel mentions
-        "user": "U789",
-    }
-
-    session_id = channel._get_session_id(event)
-    assert session_id == "agent:slack:channel:C123456"
-
-
-@pytest.mark.asyncio
-async def test_slack_on_mention_posts_to_gateway():
-    """on_app_mention should POST to gateway"""
-    channel = SlackChannel(bot_token="test_bot", app_token="test_app")
-    channel.app = MagicMock()
-    channel.app.client = AsyncMock()
-
-    event = {
-        "channel": "C123456",
-        "user": "U789",
-        "text": "<@U999> test query",
-        "thread_ts": None,
-    }
-
-    # Mock httpx stream
-    async def mock_stream(*args, **kwargs):
-        lines = [
-            'data: {"choices": [{"delta": {"content": "Response"}}]}',
-        ]
-        for line in lines:
-            yield line
-
-    mock_response = AsyncMock()
-    mock_response.aiter_lines = mock_stream
-
-    with patch("httpx.AsyncClient.stream") as mock_client:
-        mock_client.return_value.__aenter__.return_value = mock_response
-
-        await channel._on_app_mention(event)
-
-        # Verify POST to gateway
-        mock_client.assert_called_once()
-        call_args = mock_client.call_args
-        assert "chat/completions" in call_args[0][1]
-
-
-@pytest.mark.asyncio
-async def test_slack_thread_reply():
-    """send_response should respect thread_ts"""
-    channel = SlackChannel(bot_token="test_bot", app_token="test_app")
-    channel.app = MagicMock()
-    channel.app.client = AsyncMock()
-
-    await channel._send_response("C123", "Test", thread_ts="123.456")
-
-    # Verify chat_postMessage called with thread_ts
-    channel.app.client.chat_postMessage.assert_called_once()
-    call_kwargs = channel.app.client.chat_postMessage.call_args[1]
-    assert call_kwargs["thread_ts"] == "123.456"
-    assert call_kwargs["channel"] == "C123"
-    assert call_kwargs["text"] == "Test"
-```
-
-### 4c. Config 測試（可選）
+### 3a. Config 測試
 
 **檔案**：`tests/test_config.py`（擴充現有檔案）
 
+新增測試：
+
 ```python
 def test_telegram_config_defaults():
-    """Telegram config should have sensible defaults"""
+    """TelegramConfig 應有正確預設值"""
     from claw.core.config import TelegramConfig
     cfg = TelegramConfig()
     assert cfg.enabled == False
@@ -341,20 +168,119 @@ def test_telegram_config_defaults():
     assert cfg.polling == True
 
 
-def test_slack_config_from_yaml():
-    """Slack config should load from YAML"""
-    import yaml
-    yaml_str = """
-slack:
-  enabled: true
-  bot_token: "xoxb-test"
-  app_token: "xapp-test"
-"""
-    data = yaml.safe_load(yaml_str)
+def test_slack_config_defaults():
+    """SlackConfig 應有正確預設值"""
     from claw.core.config import SlackConfig
-    slack_cfg = SlackConfig(**data["slack"])
-    assert slack_cfg.enabled == True
-    assert slack_cfg.bot_token == "xoxb-test"
+    cfg = SlackConfig()
+    assert cfg.enabled == False
+    assert cfg.bot_token == ""
+    assert cfg.app_token == ""
+```
+
+### 3b. Main 啟動邏輯測試
+
+**檔案**：`tests/test_main.py`（新建）
+
+```python
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from claw.main import lifespan
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_telegram_disabled():
+    """Telegram disabled 時，不應啟動"""
+    mock_app = MagicMock()
+
+    with patch("claw.main.get_config") as mock_get_cfg:
+        mock_cfg = MagicMock()
+        mock_cfg.telegram.enabled = False
+        mock_cfg.slack.enabled = False
+        mock_get_cfg.return_value = mock_cfg
+
+        with patch("claw.main.Storage"):
+            with patch("claw.main.LLMRouterClient"):
+                with patch("claw.main.MemoryStore"):
+                    async with lifespan(mock_app):
+                        pass  # No exception
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_telegram_starts():
+    """Telegram enabled 時，應呼叫 start()"""
+    mock_app = MagicMock()
+
+    with patch("claw.main.get_config") as mock_get_cfg:
+        mock_cfg = MagicMock()
+        mock_cfg.telegram.enabled = True
+        mock_cfg.telegram.token = "test_token"
+        mock_cfg.telegram.polling = True
+        mock_cfg.slack.enabled = False
+        mock_cfg.gateway.port = 8000
+        mock_get_cfg.return_value = mock_cfg
+
+        mock_tg = AsyncMock()
+
+        with patch("claw.main.Storage"):
+            with patch("claw.main.LLMRouterClient"):
+                with patch("claw.main.MemoryStore"):
+                    with patch("claw.channels.telegram.TelegramChannel", return_value=mock_tg):
+                        async with lifespan(mock_app):
+                            pass
+
+                        # Verify start() and stop() were called
+                        mock_tg.start.assert_called_once()
+                        mock_tg.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_slack_starts():
+    """Slack enabled 時，應呼叫 start()"""
+    mock_app = MagicMock()
+
+    with patch("claw.main.get_config") as mock_get_cfg:
+        mock_cfg = MagicMock()
+        mock_cfg.telegram.enabled = False
+        mock_cfg.slack.enabled = True
+        mock_cfg.slack.bot_token = "xoxb-test"
+        mock_cfg.slack.app_token = "xapp-test"
+        mock_cfg.gateway.port = 8000
+        mock_get_cfg.return_value = mock_cfg
+
+        mock_slack = AsyncMock()
+
+        with patch("claw.main.Storage"):
+            with patch("claw.main.LLMRouterClient"):
+                with patch("claw.main.MemoryStore"):
+                    with patch("claw.channels.slack.SlackChannel", return_value=mock_slack):
+                        async with lifespan(mock_app):
+                            pass
+
+                        mock_slack.start.assert_called_once()
+                        mock_slack.stop.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_channel_error_not_fatal():
+    """Channel 啟動失敗應被 try/except 捕捉，不中斷"""
+    mock_app = MagicMock()
+
+    with patch("claw.main.get_config") as mock_get_cfg:
+        mock_cfg = MagicMock()
+        mock_cfg.telegram.enabled = True
+        mock_cfg.telegram.token = "test_token"
+        mock_cfg.slack.enabled = False
+        mock_cfg.gateway.port = 8000
+        mock_get_cfg.return_value = mock_cfg
+
+        # Mock TelegramChannel 建立失敗
+        with patch("claw.main.Storage"):
+            with patch("claw.main.LLMRouterClient"):
+                with patch("claw.main.MemoryStore"):
+                    with patch("claw.channels.telegram.TelegramChannel", side_effect=Exception("Token invalid")):
+                        # 應不拋出異常
+                        async with lifespan(mock_app):
+                            pass
 ```
 
 ---
@@ -364,10 +290,14 @@ slack:
 完成後執行：
 
 ```bash
-python -m pytest tests/test_telegram.py tests/test_slack.py -v
+# Config 測試
+python -m pytest tests/test_config.py::test_telegram_config_defaults tests/test_config.py::test_slack_config_defaults -v
+
+# Main 測試
+python -m pytest tests/test_main.py -v
 ```
 
-預期：**4+ passed**
+預期：**6 passed**（Config 2 + Main 4）
 
 再執行全套：
 
@@ -375,44 +305,48 @@ python -m pytest tests/test_telegram.py tests/test_slack.py -v
 python -m pytest tests/ -v
 ```
 
-預期：**95+ passed, 2 skipped**
+預期：**92+ passed, 2 skipped**（Phase 5 baseline 維持）
 
 ---
 
 ## 回報格式
 
 ```
-## STEP 3 完成報告
-- 修改檔案：claw/core/config.py, claw/main.py
-- 主要變更：
-  - Config: TelegramConfig + SlackConfig dataclass
-  - main.py: lifespan 中 channel 啟動邏輯
-  - YAML config 例子
+## STEP 1 完成報告
+- 檔案：claw/core/config.py
+- 修改：新增 TelegramConfig、SlackConfig dataclass
+  - TelegramConfig: enabled, token, polling
+  - SlackConfig: enabled, bot_token, app_token
+- 驗證：Config 無值時用預設值、YAML 讀取正確
 
-## STEP 4 完成報告
-- 修改檔案：tests/test_telegram.py, tests/test_slack.py
-- 新增測試：
-  - test_telegram_private_message_session_id
-  - test_telegram_group_message_session_id
-  - test_telegram_on_message_posts_to_gateway
-  - test_telegram_send_response_with_throttle
-  - test_slack_dm_session_id
-  - test_slack_channel_mention_session_id
-  - test_slack_on_mention_posts_to_gateway
-  - test_slack_thread_reply
-- 測試結果：8 passed
+## STEP 2 完成報告
+- 檔案：claw/main.py
+- 修改：lifespan() 中新增 channel 啟動和清理邏輯
+  - try/except 包裝啟動，避免失敗中斷
+  - yield 後 cleanup 所有 channels
+  - Import 在 try 內（package 可能未裝）
+- 驗證：Mock 測試確認啟動/停止邏輯
+
+## STEP 3 完成報告
+- 檔案：tests/test_config.py（+2）、tests/test_main.py（新建 +4）
+- 測試驗證：
+  - Config 預設值正確
+  - Channel disabled 時不啟動
+  - Channel enabled 時啟動 start()/stop()
+  - 啟動失敗被 try/except 捕捉
 
 ## 整體結果
-- 全套 pytest tests/：X passed, 2 skipped
-- 遇到的問題：[若有]
+- 新增測試：6 tests（config 2 + main 4）
+- pytest tests/ -v：92+ passed, 2 skipped（Phase 5 baseline）
+- **完全獨立完成，無需等待 Codex**
 ```
 
 ---
 
-## 提示
+## 技術提示
 
-- 所有 async 操作要用 `AsyncMock`
-- Gateway 在 localhost:8000（可配置）
-- 模擬 httpx stream 時，記得 `async def mock_stream()` + `yield`
-- Telegram rate limit 用 0.5s throttle
-- Slack thread reply 的 `thread_ts` 來自 `event.get("thread_ts")`
+- Mock 要用 `AsyncMock()` 非 `MagicMock()`（async 方法）
+- `patch()` context manager 可以嵌套
+- 測試 lifespan 時，用 `async with lifespan(mock_app):` 進出
+- `assert_called_once()` 驗證方法被呼叫一次
+- Import 在 try 外時，如果 package 未裝會導致 import error — 應在 try 內
