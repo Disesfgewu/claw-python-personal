@@ -62,6 +62,20 @@ class LoggingConfig:
 
 
 @dataclass
+class TelegramConfig:
+    enabled: bool = False
+    token: str = ""
+    polling: bool = True  # True=polling, False=webhook
+
+
+@dataclass
+class SlackConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    app_token: str = ""  # Socket Mode app token
+
+
+@dataclass
 class ClawConfig:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     llm_router: LLMRouterConfig = field(default_factory=LLMRouterConfig)
@@ -70,7 +84,8 @@ class ClawConfig:
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
-
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    slack: SlackConfig = field(default_factory=SlackConfig)
     def get_agent(self, agent_id: str) -> AgentConfig:
         return self.agents.get(agent_id) or self.agents.get("default") or AgentConfig()
 
@@ -94,6 +109,8 @@ def load_config(path: str = "config/default.yaml") -> ClawConfig:
         skills=SkillsConfig(**raw.get("skills", {})),
         storage=StorageConfig(**raw.get("storage", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
+        telegram=TelegramConfig(**raw.get("telegram", {})),
+        slack=SlackConfig(**raw.get("slack", {})),
     )
 
     agents_raw = raw.get("agents") or {"default": {}}

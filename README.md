@@ -3,7 +3,7 @@
 OpenClaw 的 Python 完整復刻，並整合 **NemoClaw 企業安全層**。以 [LLM-Router](https://github.com/Disesfgewu/LLM-Router) 作為唯一 LLM 閘道，透過 DDGS 實現免費搜尋，用 Docker 隔離 tool 執行環境。
 
 > **硬體基準：** Jetson Orin Nano Super（8GB unified memory, JetPack 6.x, kernel 5.15.136-tegra）
-> **當前狀態：** Phase 5 完成 — 92 tests pass, 2 skipped（channel optional deps）
+> **當前狀態：** Phase 6 完成 — 106 tests pass, 2 skipped（memory benchmark + channel optional deps）
 
 ---
 
@@ -346,20 +346,25 @@ claw-python 負責： 其他所有事
 
 ---
 
-### 🔜 Phase 6 — Channel Adapters：Telegram + Slack（目標 ~+3 tests）
+### ✅ Phase 6 — Channel Adapters：Telegram + Slack（+14 tests）
 
 目標：接通主流 messaging 平台。
 
-**P6-1. TelegramChannel** — `claw/channels/telegram.py`
-- [ ] 私訊 + 群組訊息接收
-- [ ] Streaming draft mode（0.5s throttle 避免 rate limit）
-- [ ] 媒體附件轉換為 multipart content
-- [ ] Session ID 規則：私訊 → `agent:tg:user:{id}`，群組 → `agent:tg:group:{id}`
+**P6-1. TelegramChannel** — `claw/channels/telegram.py` ✅
+- [x] 私訊 + 群組訊息接收（on_message + session_id 映射）
+- [x] Streaming draft mode（0.5s throttle 避免 rate limit）
+- [x] 媒體附件支援（PHOTO、Document handlers）
+- [x] Session ID 規則：私訊 → `agent:tg:user:{id}`，群組 → `agent:tg:group:{id}`
 
-**P6-2. SlackChannel** — `claw/channels/slack.py`
-- [ ] `app_mention` 事件接收
-- [ ] DM 接收
-- [ ] Thread reply（回覆在同一 thread）
+**P6-2. SlackChannel** — `claw/channels/slack.py` ✅
+- [x] `app_mention` 事件接收（_on_app_mention handler）
+- [x] DM 接收（_on_direct_message handler）
+- [x] Thread reply（thread_ts parameter passed through）
+
+**P6-3. Config + Main Integration** — `claw/core/config.py` + `claw/main.py` ✅
+- [x] TelegramConfig / SlackConfig dataclass 定義
+- [x] lifespan() 中 channel 啟動邏輯（try/except 異常處理）
+- [x] 優雅停止（yield 後 cleanup）
 
 **前置條件：** `pip install -e ".[channels]"`（python-telegram-bot、slack-bolt）
 
@@ -458,11 +463,11 @@ claw-python/
 │   │   ├── policy.py                # needs_sandbox() + SandboxPolicy（Phase 4）
 │   │   └── seccomp_minimal.json     # 160-syscall 白名單（Phase 4）
 │   │
-│   ├── channels/                    # Phase 1-3（Phase 6 擴充）
+│   ├── channels/                    # Phase 6 Channel Adapters
 │   │   ├── base.py                  # BaseChannel ABC
 │   │   ├── policy.py                # allowFrom、dmPolicy
-│   │   ├── telegram.py              # Phase 6
-│   │   └── slack.py                 # Phase 6
+│   │   ├── telegram.py              # Phase 6 ✅ TelegramChannel（polling、session ID、rate limit）
+│   │   └── slack.py                 # Phase 6 ✅ SlackChannel（Socket Mode、thread support）
 │   │
 │   ├── cron/                        # Phase 3
 │   │   ├── service.py               # APScheduler 排程服務
@@ -508,8 +513,9 @@ claw-python/
 │   ├── test_context.py              # 5 tests（Phase 5）
 │   ├── test_memory.py               # 5 tests（Phase 5）
 │   ├── test_memory_tools.py         # 4 tests（Phase 5）
-│   ├── test_slack.py                # Phase 6（skipped: optional dep）
-│   └── test_telegram.py             # Phase 6（skipped: optional dep）
+│   ├── test_slack.py                # Phase 6 ✅ 4 tests（session ID, mention, thread）
+│   └── test_telegram.py             # Phase 6 ✅ 4 tests（session ID, message, throttle）
+│   └── test_main.py                 # Phase 6 ✅ 4 tests（channel startup/shutdown, error handling）
 │
 ├── pyproject.toml
 └── README.md

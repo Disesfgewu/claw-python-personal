@@ -13,6 +13,9 @@ import claw.core.gateway as gateway_module
 import claw.tools.bash    # 觸發 bash tool 的注冊
 import claw.tools.search  # 觸發 search_web tool 的注冊
 import claw.tools.memory_tools  # 觸發 memory_save / memory_search 工具注冊
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -51,7 +54,43 @@ async def lifespan(app: FastAPI):
     if cfg.skills.autoload:
         load_skills(cfg.skills.dir)
 
+    channels = []
+
+    if cfg.telegram.enabled:
+        try:
+            from claw.channels.telegram import TelegramChannel
+            tg = TelegramChannel(
+                token=cfg.telegram.token,
+                base_url=f"http://localhost:{cfg.gateway.port}",
+                polling=cfg.telegram.polling,
+            )
+            await tg.start()
+            channels.append(tg)
+            logger.info("Telegram channel started")
+        except Exception as e:
+            logger.error(f"Failed to start Telegram channel: {e}")
+
+    if cfg.slack.enabled:
+        try:
+            from claw.channels.slack import SlackChannel
+            slack = SlackChannel(
+                bot_token=cfg.slack.bot_token,
+                app_token=cfg.slack.app_token,
+                base_url=f"http://localhost:{cfg.gateway.port}",
+            )
+            await slack.start()
+            channels.append(slack)
+            logger.info("Slack channel started")
+        except Exception as e:
+            logger.error(f"Failed to start Slack channel: {e}")
+
     yield
+
+    for channel in channels:
+        try:
+            await channel.stop()
+        except Exception as e:
+            logger.error(f"Error stopping channel: {e}")
 
     await get_runner().destroy_all()
     await llm.close()

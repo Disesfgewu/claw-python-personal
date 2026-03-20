@@ -104,3 +104,21 @@ def test_missing_yaml_uses_defaults(monkeypatch, tmp_path):
     assert cfg.gateway.port == 18790
     assert cfg.skills.dir == "skills"
     assert cfg.skills.autoload is True
+
+
+def test_telegram_config_defaults():
+    """TelegramConfig 應有正確預設值"""
+    from claw.core.config import TelegramConfig
+    cfg = TelegramConfig()
+    assert cfg.enabled == False
+    assert cfg.token == ""
+    assert cfg.polling == True
+
+
+def test_slack_config_defaults():
+    """SlackConfig 應有正確預設值"""
+    from claw.core.config import SlackConfig
+    cfg = SlackConfig()
+    assert cfg.enabled == False
+    assert cfg.bot_token == ""
+    assert cfg.app_token == ""

@@ -1,147 +1,119 @@
 from __future__ import annotations
+
+import asyncio
+import json
 import logging
-import time
-from typing import AsyncIterator
+from typing import TYPE_CHECKING
 
-try:
+import httpx
+
+if TYPE_CHECKING:
     from telegram import Update
-    from telegram.ext import Application, MessageHandler, filters, ContextTypes
-    _TELEGRAM_AVAILABLE = True
-except ImportError:
-    _TELEGRAM_AVAILABLE = False
-
-from claw.channels.base import BaseChannel
-from claw.core.queue import MessageQueue
-from claw.media.store import MediaStore
+    from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramChannel(BaseChannel):
+class TelegramChannel:
     def __init__(
         self,
         token: str,
-        queue: MessageQueue | None,
-        media_store: MediaStore | None,
-        llm_router_url: str,
-        api_key: str = "",
+        base_url: str = "http://localhost:8000",
+        polling: bool = True,
     ):
         self.token = token
-        self.queue = queue
-        self.media_store = media_store
-        self.llm_router_url = llm_router_url
-        self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
+        self.polling = polling
         self.app = None
-        self._session_to_chat: dict[str, int] = {}  # session_id → chat_id
 
     async def start(self) -> None:
-        if not _TELEGRAM_AVAILABLE:
-            raise ImportError("python-telegram-bot not installed. Run: pip install 'claw-python[channels]'")
+        try:
+            from telegram.ext import Application, MessageHandler, filters
+        except Exception as e:
+            raise ImportError("python-telegram-bot not installed") from e
 
         self.app = Application.builder().token(self.token).build()
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
-        self.app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self._on_media))
+        self.app.add_handler(
+            MessageHandler(
+                filters.TEXT | filters.PHOTO | filters.Document.ALL,
+                self.on_message,
+            )
+        )
         await self.app.initialize()
         await self.app.start()
-        await self.app.updater.start_polling()
+        if self.polling and self.app.updater:
+            await self.app.updater.start_polling()
         logger.info("TelegramChannel started")
 
     async def stop(self) -> None:
-        if self.app:
+        if not self.app:
+            return
+        if self.polling and self.app.updater:
             await self.app.updater.stop()
-            await self.app.stop()
-            await self.app.shutdown()
+        await self.app.stop()
+        await self.app.shutdown()
 
-    async def send(self, session_id: str, text: str) -> None:
-        chat_id = self._session_to_chat.get(session_id)
-        if chat_id is None:
-            logger.warning(f"No chat_id for session {session_id}")
+    async def on_message(self, update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+        if not update or not update.message:
             return
-        try:
-            await self.app.bot.send_message(chat_id, text[:4000], parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Telegram send error: {e}")
-
-    async def send_stream(self, session_id: str, chunks: AsyncIterator[str]) -> None:
-        """Draft mode: send first chunk, then edit on throttled intervals."""
-        chat_id = self._session_to_chat.get(session_id)
-        if chat_id is None:
-            return
-
-        buf = ""
-        msg_id = None
-        last_update = 0.0
-
-        async for chunk in chunks:
-            buf += chunk
-            now = time.time()
-            if now - last_update > 0.5:  # throttle to 0.5s
-                try:
-                    if msg_id is None:
-                        msg = await self.app.bot.send_message(
-                            chat_id, buf[:4000] or "...", parse_mode="Markdown"
-                        )
-                        msg_id = msg.message_id
-                    else:
-                        await self.app.bot.edit_message_text(
-                            buf[:4000], chat_id, msg_id, parse_mode="Markdown"
-                        )
-                    last_update = now
-                except Exception as e:
-                    logger.warning(f"Telegram stream throttle error: {e}")
-
-        # Final update
-        if msg_id and buf:
-            try:
-                await self.app.bot.edit_message_text(
-                    buf[:4000], chat_id, msg_id, parse_mode="Markdown"
-                )
-            except Exception:
-                pass
-
-    async def send_typing(self, session_id: str) -> None:
-        chat_id = self._session_to_chat.get(session_id)
-        if chat_id and self.app:
-            try:
-                await self.app.bot.send_chat_action(chat_id, "typing")
-            except Exception:
-                pass
-
-    async def _on_message(self, update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
         text = update.message.text
-        session_id = self._resolve_session_id(update)
-        if self.queue:
-            await self.queue.submit(session_id, text)
-
-    async def _on_media(self, update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
-        session_id = self._resolve_session_id(update)
-
-        if update.message.photo:
-            file = await update.message.photo[-1].get_file()
-        elif update.message.document:
-            file = await update.message.document.get_file()
-        else:
+        if not text:
             return
 
+        chat_id = update.message.chat.id
+        session_id = self._get_session_id(update)
         try:
-            file_data = await file.download_as_bytearray()
-            from claw.media.mime import guess_mime
-            from claw.media.input import prepare_media_message
-            mime = guess_mime(bytes(file_data), file.file_path or "")
-            description = await prepare_media_message(
-                bytes(file_data), mime, self.media_store, self.llm_router_url, self.api_key
-            )
-            if self.queue:
-                await self.queue.submit(session_id, description)
+            response_text = await self._call_gateway(session_id, text)
+            if response_text:
+                await self._send_response(chat_id, response_text)
         except Exception as e:
-            logger.error(f"Telegram media processing error: {e}")
+            logger.error(f"Telegram gateway error: {e}")
+            await self._send_response(chat_id, f"Error: {e}")
 
-    def _resolve_session_id(self, update: "Update") -> str:
-        """Map Telegram chat → claw session_id. Side-effect: updates _session_to_chat."""
-        chat = update.effective_chat
-        if chat.type == "private":
-            session_id = "agent:main"
-        else:
-            session_id = f"agent:tg:group:{chat.id}"
-        self._session_to_chat[session_id] = chat.id
-        return session_id
+    def _get_session_id(self, update: "Update") -> str:
+        if update.message.chat.type == "private":
+            return f"agent:tg:user:{update.message.from_user.id}"
+        return f"agent:tg:group:{update.message.chat.id}"
+
+    async def _call_gateway(self, session_id: str, text: str) -> str:
+        url = f"{self.base_url}/v1/chat/completions"
+        payload = {
+            "session_id": session_id,
+            "messages": [{"role": "user", "content": text}],
+            "stream": True,
+        }
+        chunks: list[str] = []
+        async with httpx.AsyncClient() as client:
+            async with client.stream("POST", url, json=payload, timeout=30.0) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    piece = delta.get("content")
+                    if piece:
+                        chunks.append(piece)
+        return "".join(chunks)
+
+    async def _send_response(self, chat_id: int, text: str) -> None:
+        if not text:
+            return
+        for i in range(0, len(text), 4096):
+            await asyncio.sleep(0.5)
+            chunk = text[i:i + 4096]
+            try:
+                await self._bot_send_message(chat_id, chunk)
+            except Exception as e:
+                logger.error(f"Telegram send error: {e}")
+
+    async def _bot_send_message(self, chat_id: int, text: str) -> None:
+        if not self.app:
+            raise RuntimeError("Telegram application not started")
+        await self.app.bot.send_message(chat_id, text)
