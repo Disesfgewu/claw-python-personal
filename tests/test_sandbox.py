@@ -80,3 +80,23 @@ async def test_registry_execute_bash_sandbox(monkeypatch):
     )
     assert out == "sandboxed"
     assert fake_runner.calls == [("agent:telegram:group:123", "echo hello", None)]
+
+
+def test_sandbox_policy_from_blueprint():
+    from claw.sandbox.policy import SandboxPolicy
+    from config.blueprint import Blueprint
+    bp = Blueprint(sandbox_memory_mb=512, sandbox_tmp_mb=64, sandbox_cpus=2.0)
+    policy = SandboxPolicy.from_blueprint(bp)
+    assert policy.memory_limit_mb == 512
+    assert policy.tmp_size_mb == 64
+    assert policy.cpus == 2.0
+
+
+def test_seccomp_json_valid():
+    import json
+    from pathlib import Path
+    p = Path("claw/sandbox/seccomp_minimal.json")
+    assert p.exists()
+    data = json.loads(p.read_text())
+    assert data["defaultAction"] == "SCMP_ACT_ERRNO"
+    assert len(data["syscalls"][0]["names"]) > 20

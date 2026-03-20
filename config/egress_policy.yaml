@@ -1,0 +1,17 @@
+default: deny
+egress_rules:
+  - dest: "llm-router.local"
+    methods: [POST]
+    verdict: allow
+  - dest: "127.0.0.1"
+    methods: [GET, POST]
+    verdict: allow
+  - dest: "localhost"
+    methods: [GET, POST]
+    verdict: allow
+  - dest: "duckduckgo.com"
+    methods: [GET, POST]
+    verdict: allow
+  - dest: "html.duckduckgo.com"
+    methods: [GET]
+    verdict: allow

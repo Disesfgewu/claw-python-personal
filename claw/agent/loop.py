@@ -19,10 +19,23 @@ from claw.agent.hooks import get_hooks
 MAX_TOOL_ROUNDS = 8   # 最多幾輪 tool call，防止無限迴圈
 
 
+def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
+    """Infer egress destination hostname from tool call."""
+    if tool_name == "search":
+        return "duckduckgo.com"
+    if tool_name in ("web_fetch", "browser_navigate"):
+        url = tool_input.get("url", "")
+        if "://" in url:
+            parts = url.split("/")
+            return parts[2] if len(parts) > 2 else None
+    return None
+
+
 class AgentLoop:
-    def __init__(self, storage: Storage, llm: LLMRouterClient):
+    def __init__(self, storage: Storage, llm: LLMRouterClient, egress=None):
         self.storage = storage
         self.llm = llm
+        self.egress = egress  # EgressPolicy | None
 
     async def run(
         self,
@@ -155,12 +168,34 @@ class AgentLoop:
                                 tool_call_id=pc.id, name=pc.name, arguments=pc.arguments
                             )
 
-                            result = await tool_registry.execute(
-                                pc.name,
-                                pc.arguments,
-                                session_id=session_id,
-                                session_is_main=is_main,
-                            )
+                            # ── Egress check ──
+                            if self.egress is not None:
+                                _dest = _infer_egress_dest(pc.name, pc.arguments)
+                                if _dest:
+                                    from claw.tools.policy import EgressVerdict
+                                    _verdict = self.egress.check(_dest)
+                                    await self.egress.audit(_dest, _verdict, pc.name)
+                                    if _verdict == EgressVerdict.DENY:
+                                        result = f"[egress denied] {_dest} not whitelisted."
+                                        # skip to yield ToolCallResult
+                                    elif _verdict == EgressVerdict.PENDING:
+                                        _req_id = await self.egress.request_approval(_dest, "POST")
+                                        result = f"[egress pending #{_req_id}] {_dest} awaiting approval."
+                                        # skip to yield ToolCallResult
+                                    else:
+                                        result = None  # proceed normally
+                                else:
+                                    result = None
+                            else:
+                                result = None
+                            # ─────────────────
+                            if result is None:
+                                result = await tool_registry.execute(
+                                    pc.name,
+                                    pc.arguments,
+                                    session_id=session_id,
+                                    session_is_main=is_main,
+                                )
                             result = await hooks.fire(
                                 "after_tool_call",
                                 session_id=session_id,
@@ -256,12 +291,34 @@ class AgentLoop:
                         tool_call_id=tc_id, name=tc_name, arguments=tc_args
                     )
 
-                    result = await tool_registry.execute(
-                        tc_name,
-                        tc_args,
-                        session_id=session_id,
-                        session_is_main=is_main,
-                    )
+                    # ── Egress check ──
+                    if self.egress is not None:
+                        _dest = _infer_egress_dest(tc_name, tc_args)
+                        if _dest:
+                            from claw.tools.policy import EgressVerdict
+                            _verdict = self.egress.check(_dest)
+                            await self.egress.audit(_dest, _verdict, tc_name)
+                            if _verdict == EgressVerdict.DENY:
+                                result = f"[egress denied] {_dest} not whitelisted."
+                                # skip to yield ToolCallResult
+                            elif _verdict == EgressVerdict.PENDING:
+                                _req_id = await self.egress.request_approval(_dest, "POST")
+                                result = f"[egress pending #{_req_id}] {_dest} awaiting approval."
+                                # skip to yield ToolCallResult
+                            else:
+                                result = None  # proceed normally
+                        else:
+                            result = None
+                    else:
+                        result = None
+                    # ─────────────────
+                    if result is None:
+                        result = await tool_registry.execute(
+                            tc_name,
+                            tc_args,
+                            session_id=session_id,
+                            session_is_main=is_main,
+                        )
                     result = await hooks.fire(
                         "after_tool_call",
                         session_id=session_id,

@@ -198,3 +198,54 @@ async def health():
         return {"status": "ok", "llm_router": status}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ── Egress Admin Endpoints ────────────────────────────────────
+
+import aiosqlite as _aiosqlite
+from pathlib import Path as _Path
+from fastapi import BackgroundTasks, HTTPException
+
+
+@app.get("/admin/egress/pending")
+async def egress_list_pending():
+    db_path = _Path("~/.claw/claw.db").expanduser()
+    async with _aiosqlite.connect(db_path) as db:
+        db.row_factory = _aiosqlite.Row
+        async with db.execute(
+            "SELECT id, dest, method, requested_at FROM egress_pending ORDER BY requested_at DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/admin/egress/{req_id}/approve")
+async def egress_approve(req_id: str, background_tasks: BackgroundTasks):
+    db_path = _Path("~/.claw/claw.db").expanduser()
+    async with _aiosqlite.connect(db_path) as db:
+        db.row_factory = _aiosqlite.Row
+        async with db.execute(
+            "SELECT dest, method FROM egress_pending WHERE id=?", (req_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Request {req_id!r} not found")
+        dest, method = row["dest"], row["method"]
+        await db.execute("DELETE FROM egress_pending WHERE id=?", (req_id,))
+        await db.commit()
+    from claw.tools.policy import get_egress_policy
+    get_egress_policy().add_rule(dest, method)
+    return {"approved": dest, "method": method}
+
+
+@app.get("/admin/egress/audit")
+async def egress_audit_log(limit: int = 100):
+    db_path = _Path("~/.claw/claw.db").expanduser()
+    async with _aiosqlite.connect(db_path) as db:
+        db.row_factory = _aiosqlite.Row
+        async with db.execute(
+            "SELECT ts, dest, verdict, tool FROM egress_audit_log ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]

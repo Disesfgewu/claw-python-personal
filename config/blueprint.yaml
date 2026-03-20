@@ -1,0 +1,7 @@
+name: claw-python
+version: "0.4.0"
+sha256: ""
+sandbox_memory_mb: 400
+sandbox_tmp_mb: 128
+sandbox_cpus: 1.5
+egress_policy_path: config/egress_policy.yaml

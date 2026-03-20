@@ -83,6 +83,23 @@ class Storage:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.executescript(SCHEMA_SQL)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS egress_pending (
+                    id           TEXT PRIMARY KEY,
+                    dest         TEXT NOT NULL,
+                    method       TEXT NOT NULL,
+                    requested_at INTEGER NOT NULL
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS egress_audit_log (
+                    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts      INTEGER NOT NULL,
+                    dest    TEXT NOT NULL,
+                    verdict TEXT NOT NULL,
+                    tool    TEXT NOT NULL
+                )
+            """)
             await db.commit()
 
     # --- Session ---

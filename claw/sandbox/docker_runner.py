@@ -105,6 +105,7 @@ class DockerRunner:
     def _create_container(self, session_id: str) -> SandboxContainer:
         import os
         import time
+        from pathlib import Path
 
         cfg = get_config().sandbox
         client = self._get_client()
@@ -114,6 +115,21 @@ class DockerRunner:
         )
         os.makedirs(workspace, exist_ok=True)
 
+        # Security options
+        security_opt = ["no-new-privileges:true"]
+        seccomp_path = Path(__file__).parent / "seccomp_minimal.json"
+        if seccomp_path.exists():
+            security_opt.append(f"seccomp={seccomp_path}")
+
+        # Memory: support both old string format ("256m") and new integer (400)
+        memory_mb = getattr(cfg, "memory_limit_mb", None)
+        if memory_mb is None:
+            mem_str = getattr(cfg, "memory_limit", "256m")
+            memory_mb = int(str(mem_str).rstrip("mM"))
+
+        cpus = float(getattr(cfg, "cpus", 1.5))
+        tmp_size_mb = int(getattr(cfg, "tmp_size_mb", 128))
+
         container = client.containers.run(
             image=cfg.image,
             command="/bin/bash",
@@ -122,15 +138,27 @@ class DockerRunner:
             stdin_open=True,
             working_dir=cfg.workspace_dir,
             volumes={workspace: {"bind": cfg.workspace_dir, "mode": "rw"}},
-            mem_limit=cfg.memory_limit,
-            cpu_period=cfg.cpu_period,
-            cpu_quota=cfg.cpu_quota,
+            mem_limit=f"{memory_mb}m",
+            memswap_limit=f"{memory_mb}m",
+            nano_cpus=int(cpus * 1e9),
             network_mode="none",
-            read_only=False,
+            read_only=True,
+            tmpfs={
+                "/tmp": f"size={tmp_size_mb}m,exec",
+                "/run": "size=8m",
+                "/var/tmp": "size=8m",
+            },
+            security_opt=security_opt,
+            user="nobody",
             remove=False,
             labels={"claw.session_id": session_id},
         )
-        logger.info(f"sandbox created: {container.short_id} for {session_id}")
+        logger.info(
+            f"sandbox created (hardened): {container.short_id} "
+            f"mem={memory_mb}m cpus={cpus} "
+            f"seccomp={'yes' if seccomp_path.exists() else 'no'} "
+            f"for {session_id}"
+        )
         return SandboxContainer(
             session_id=session_id,
             container_id=container.id,
