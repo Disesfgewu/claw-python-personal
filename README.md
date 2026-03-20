@@ -3,7 +3,7 @@
 OpenClaw 的 Python 完整復刻，並整合 **NemoClaw 企業安全層**。以 [LLM-Router](https://github.com/Disesfgewu/LLM-Router) 作為唯一 LLM 閘道，透過 DDGS 實現免費搜尋，用 Docker 隔離 tool 執行環境。
 
 > **硬體基準：** Jetson Orin Nano Super（8GB unified memory, JetPack 6.x, kernel 5.15.136-tegra）
-> **當前狀態：** Phase 4 完成 — 85 tests pass, 2 skipped（channel optional deps）
+> **當前狀態：** Phase 5 完成 — 92 tests pass, 2 skipped（channel optional deps）
 
 ---
 
@@ -291,28 +291,58 @@ claw-python 負責： 其他所有事
 
 ---
 
-### 🔜 Phase 5 — Memory/RAG + Context Compaction（目標 ~+8 tests）
+### ✅ Phase 5 — Memory/RAG + Context Compaction（+8 tests）
 
 目標：長期記憶，語意搜尋，Context 自動壓縮。
 
-**P5-1. MemoryStore** — `claw/memory/sqlite_store.py`
-- [ ] SQLite FTS5 全文索引表
-- [ ] sqlite-vec 向量表（embedding 儲存 + ANN 查詢）
-- [ ] `save(text, embedding, session_id, ts)`
-- [ ] `search_fts(query, limit)` + `search_vec(embedding, limit)`
+**P5-1. MemoryStore** — `claw/memory/sqlite_store.py` ✅
+- [x] SQLite FTS5 全文索引表（`memory_fts` virtual table）
+- [x] sqlite-vec 向量表（`memory_vec` ANN 查詢）
+- [x] `add(session_id, content, embedding, metadata)` 返回 memory_id
+- [x] `vector_search(query_emb, session_id, limit)` KNN 查詢
+- [x] `fts_search(query, session_id, limit)` BM25 全文檢索
+- [x] `delete(memory_id)` 刪除記憶
+- **3 tests pass**（save+vector, FTS, delete）
 
-**P5-2. MemoryManager** — `claw/memory/manager.py`
-- [ ] Hybrid search：FTS5 BM25 + 向量 ANN → RRF fusion 排名
-- [ ] Temporal decay：根據時間衰減相關性分數
-- [ ] `memory_save` / `memory_search` tools 注冊
-- [ ] Embedding 透過 LLM-Router `/v1/embeddings` 取得
+**P5-2. MemoryManager** — `claw/memory/manager.py` ✅
+- [x] Hybrid search：FTS5 BM25 + 向量 ANN → RRF fusion 排名（k=60）
+- [x] Temporal decay：`exp(-0.05 * days_old)` 時間衰減分數
+- [x] `save(session_id, content, metadata)` 自動生成 embedding
+- [x] `search(query, session_id, limit, hybrid_weight)` 混合搜尋
+- [x] `_get_embedding(text)` via LLM-Router `/v1/embeddings`，fallback 零向量
+- **2 tests pass**（RRF fusion, temporal decay）
 
-**P5-3. ContextBuilder 強化** — `claw/agent/context.py`
-- [ ] `tiktoken` token 計數（已有基礎，需完整整合）
-- [ ] Head/tail compaction：超過 token 上限時保留頭尾，壓縮中段
-- [ ] 自動注入相關記憶到 system prompt
+**P5-3. AgentLoop 記憶整合** — `claw/agent/loop.py` ✅
+- [x] `__init__` 接受 `memory: MemoryManager | None` 參數
+- [x] **自動召回**：build_context 前搜索相關記憶（top-3），附加到 user message
+- [x] **自動存記**：RunComplete 後存記「User → Assistant」對話摘要
 
-**新增依賴（已在 pyproject.toml）：** `tiktoken>=0.5.0`、`sqlite-vec>=0.1.0`
+**P5-4. ContextBuilder 強化** — `claw/agent/context.py` ✅
+- [x] `tiktoken` token 計數（`cl100k_base` encoding）
+- [x] `count_tokens(messages)` 估計 token 總數
+- [x] **Head/tail compaction**：超過 token 上限時保留 system + last 20 messages，壓縮中段
+- [x] `build_context()` 整合 `context_builder.compact_if_needed()`
+- **5 tests pass**（token count, no-compaction, head-tail, non-zero, build_context integration）
+
+**P5-5. Memory Tools** — `claw/tools/memory_tools.py` ✅
+- [x] `@tool memory_save(content, tags)` 保存到記憶
+- [x] `@tool memory_search(query, limit)` 搜尋記憶
+- [x] Tool 自動注冊（`import claw.tools.memory_tools` trigger）
+- **4 tests pass**（not-initialized, save, search-results, search-empty）
+
+**P5-6. Gateway/Main 初始化** — `claw/main.py`, `claw/core/gateway.py` ✅
+- [x] `lifespan()` 初始化 `MemoryStore` → `memory.db`
+- [x] 建立 `MemoryManager` 並注入 LLM-Router client
+- [x] `set_memory_manager()` 呼叫，供 tools 使用
+- [x] `gateway_module.memory` 賦值
+- [x] `get_agent_loop()` 從 gateway 提取 memory 並傳給 AgentLoop
+
+**整體測試成果：** 92 passed, 2 skipped（+8 new tests）
+- test_memory.py: 5 (原 3 + RRF + decay)
+- test_context.py: 5 (原 4 + build_context integration)
+- test_memory_tools.py: 4 (not-init, save, search-results, search-empty)
+
+**依賴確認：** `tiktoken>=0.5.0` ✅、`sqlite-vec>=0.1.0` ✅（pyproject.toml）
 
 ---
 
@@ -421,7 +451,7 @@ claw-python/
 │   │   ├── bash.py                  # bash tool
 │   │   ├── cron.py                  # cron_add / list / delete（Phase 3）
 │   │   ├── sessions_tools.py        # sessions_send / spawn（Phase 3）
-│   │   └── memory_tools.py          # memory_save / search（Phase 5 準備）
+│   │   └── memory_tools.py          # memory_save / search tools（Phase 5）
 │   │
 │   ├── sandbox/                     # Phase 2-4
 │   │   ├── docker_runner.py         # 強化版 container（read_only + tmpfs + seccomp）
@@ -440,7 +470,7 @@ claw-python/
 │   │   ├── schedule.py              # Cron 規則解析
 │   │   └── store.py                 # Cron job 持久化
 │   │
-│   ├── memory/                      # Phase 5 準備
+│   ├── memory/                      # Phase 5（FTS5 + sqlite-vec + manager）
 │   │   ├── manager.py               # Hybrid search + RRF + temporal decay
 │   │   └── sqlite_store.py          # SQLite FTS5 + sqlite-vec
 │   │
@@ -475,8 +505,9 @@ claw-python/
 │   ├── test_auth.py                 # Phase 2
 │   ├── test_config.py               # Phase 2
 │   ├── test_skills.py               # Phase 2
-│   ├── test_context.py              # Phase 5 準備
-│   ├── test_memory.py               # Phase 5 準備
+│   ├── test_context.py              # 5 tests（Phase 5）
+│   ├── test_memory.py               # 5 tests（Phase 5）
+│   ├── test_memory_tools.py         # 4 tests（Phase 5）
 │   ├── test_slack.py                # Phase 6（skipped: optional dep）
 │   └── test_telegram.py             # Phase 6（skipped: optional dep）
 │
