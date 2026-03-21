@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import AsyncIterator, TYPE_CHECKING
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from claw.core.storage import Storage, MessageRow
@@ -30,6 +31,12 @@ logger = logging.getLogger(__name__)
 _slog = get_logger(__name__)
 
 
+_NETWORK_PATTERN = re.compile(
+    r'\b(curl|wget|requests|httpx|urllib|nc\b|netcat|ssh|scp|rsync|pip\s+install|apt\s+install)\b',
+    re.IGNORECASE,
+)
+
+
 def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
     """Infer egress destination hostname from tool call."""
     if tool_name == "search":
@@ -39,6 +46,13 @@ def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
         if "://" in url:
             parts = url.split("/")
             return parts[2] if len(parts) > 2 else None
+    if tool_name == "bash":
+        command = tool_input.get("command", "")
+        if _NETWORK_PATTERN.search(command):
+            url_match = re.search(r'https?://([^\s/\'"]+)', command)
+            if url_match:
+                return url_match.group(1)
+            return "external-network"
     return None
 
 

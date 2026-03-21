@@ -36,7 +36,8 @@ async def memory_save(
     except Exception:
         tag_list = []
     metadata = {"tags": tag_list}
-    memory_id = await _memory_manager.save(session_id, content, metadata)
+    effective_session_id = session_id if session_id else "agent:main"
+    memory_id = await _memory_manager.save(effective_session_id, content, metadata)
     return f"✅ Memory saved id={memory_id[:8]}"
 
 
@@ -58,7 +59,11 @@ async def memory_search(
 ) -> str:
     if _memory_manager is None:
         return "Error: MemoryManager not initialized"
-    results = await _memory_manager.search(query, session_id, limit)
+    # Child sessions must never search across other sessions.
+    # Passing session_id ensures the SQL WHERE clause filters correctly.
+    # If session_id is falsy for any reason, default to main to prevent cross-session leakage.
+    effective_session_id: str | None = session_id if session_id else "agent:main"
+    results = await _memory_manager.search(query, effective_session_id, limit)
     if not results:
         return "(No relevant memory)"
     lines = [

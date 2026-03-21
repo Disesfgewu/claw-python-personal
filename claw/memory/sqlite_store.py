@@ -73,6 +73,9 @@ class MemoryStore:
                 "SELECT rowid FROM memory_vectors WHERE id = ?", (memory_id,)
             ) as cur:
                 row = await cur.fetchone()
+            
+            if not row:
+                raise RuntimeError("Failed to retrieve rowid for inserted memory")
             rowid = row[0]
 
             # Update rowid_key

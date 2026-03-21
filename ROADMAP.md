@@ -2,7 +2,7 @@
 
 > 更新日期：2026-03-21
 > 硬體：Jetson Orin Nano Super（8GB unified memory, kernel 5.15.136-tegra）
-> 當前狀態：Phase 7.5 完成，**125 tests 通過**，進行中：Phase 7 Observability
+> 當前狀態：Phase 8a 完成，**135 tests 通過**
 
 ---
 
@@ -18,7 +18,8 @@
 | Phase 5 | Memory/RAG（FTS5 + sqlite-vec）+ Context Compaction | 92 |
 | Phase 6 | Telegram + Slack Channel Adapters | 106 |
 | Phase 7.5 | Code Quality 改善（9.5/10，Pylance 26→6，Optional 清零） | 125 |
-| Phase 7 | Observability（structlog + Prometheus + Admin API v2 + Session Reaper） | **137** |
+| Phase 7 | Observability（structlog + Prometheus + Admin API v2 + Session Reaper） | 125 |
+| Phase 8a | 安全修補 + web_fetch + file_tools + bash egress + memory 隔離 | **135** |
 
 ---
 

@@ -144,9 +144,9 @@ class DockerRunner:
             network_mode="none",
             read_only=True,
             tmpfs={
-                "/tmp": f"size={tmp_size_mb}m,exec",
-                "/run": "size=8m",
-                "/var/tmp": "size=8m",
+                "/tmp": f"size={tmp_size_mb}m,noexec,nosuid",
+                "/run": "size=8m,noexec,nosuid",
+                "/var/tmp": "size=8m,noexec,nosuid",
             },
             security_opt=security_opt,
             user="nobody",
