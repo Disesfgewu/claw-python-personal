@@ -32,3 +32,19 @@ async def ws_auth_middleware(ws: WebSocket, token: str) -> bool:
         await ws.close(code=4003)
         return False
     return True
+
+
+import os
+
+
+def verify_admin_token(token: str) -> bool:
+    """
+    Verify admin API token.
+    Token is read from CLAW_ADMIN_TOKEN environment variable.
+    Returns False (deny all) if env var is not set.
+    """
+    expected = os.environ.get("CLAW_ADMIN_TOKEN", "")
+    if not expected:
+        return False
+    return hmac.compare_digest(token, expected)
+

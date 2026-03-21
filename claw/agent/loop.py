@@ -18,6 +18,8 @@ from claw.agent.prompt_tools import (
     format_tool_result_message,
 )
 from claw.agent.hooks import get_hooks
+from claw.core import metrics as _metrics
+from claw.core.logger import get_logger, set_session_context
 
 if TYPE_CHECKING:
     from claw.memory.manager import MemoryManager
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 MAX_TOOL_ROUNDS = 8   # 最多幾輪 tool call，防止無限迴圈
 
 logger = logging.getLogger(__name__)
+_slog = get_logger(__name__)
 
 
 def _infer_egress_dest(tool_name: str, tool_input: dict) -> str | None:
@@ -64,12 +67,15 @@ class AgentLoop:
         執行一次 agent run，yield Events。
         caller 用 async for 收 events，即時串流輸出。
         """
+        set_session_context(session_id, agent_id=getattr(self, "agent_id", "default"))
+        _slog.info("agent.run_start", session_id=session_id, model=model)
         session = await self.storage.get_session(session_id)
         if session is None:
             yield RunError(error=f"session not found: {session_id}")
             return
 
         is_main = is_main_session(session_id)
+        _metrics.record_agent_run(session_id=session_id, model=model or "auto")
         sys_prompt = system_prompt or session.system_prompt or DEFAULT_SYSTEM_PROMPT
         hooks = get_hooks()
         sys_prompt = await hooks.fire(
@@ -214,6 +220,7 @@ class AgentLoop:
                                     _verdict = self.egress.check(_dest)
                                     await self.egress.audit(_dest, _verdict, pc.name)
                                     if _verdict == EgressVerdict.DENY:
+                                        _slog.warning("egress.denied", dest=_dest, tool=pc.name)
                                         result = f"[egress denied] {_dest} not whitelisted."
                                         # skip to yield ToolCallResult
                                     elif _verdict == EgressVerdict.PENDING:
@@ -228,6 +235,7 @@ class AgentLoop:
                                 result = None
                             # ─────────────────
                             if result is None:
+                                _slog.info("tool.call", tool=pc.name, session_id=session_id)
                                 result = await tool_registry.execute(
                                     pc.name,
                                     pc.arguments,
@@ -242,6 +250,8 @@ class AgentLoop:
                                 result=result,
                             )
                             call_results.append(result)
+                            _verdict_str = "egress_denied" if result.startswith("[egress denied]") else "success"
+                            _metrics.record_tool_call(tool_name=pc.name, verdict=_verdict_str)
 
                             self.storage.append_transcript(session_id, {
                                 "ts": now_iso(), "type": "tool_result",
@@ -338,6 +348,7 @@ class AgentLoop:
                             _verdict = self.egress.check(_dest)
                             await self.egress.audit(_dest, _verdict, tc_name)
                             if _verdict == EgressVerdict.DENY:
+                                _slog.warning("egress.denied", dest=_dest, tool=tc_name)
                                 result = f"[egress denied] {_dest} not whitelisted."
                                 # skip to yield ToolCallResult
                             elif _verdict == EgressVerdict.PENDING:
@@ -352,6 +363,7 @@ class AgentLoop:
                         result = None
                     # ─────────────────
                     if result is None:
+                        _slog.info("tool.call", tool=tc_name, session_id=session_id)
                         result = await tool_registry.execute(
                             tc_name,
                             tc_args,

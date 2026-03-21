@@ -205,15 +205,37 @@ async def health():
         return {"status": "error", "error": str(e)}
 
 
+from fastapi.responses import Response as _Response
+from claw.core.metrics import get_metrics_output
+
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    content, content_type = get_metrics_output()
+    return _Response(content=content, media_type=content_type)
+
+
 # ── Egress Admin Endpoints ────────────────────────────────────
 
 import aiosqlite as _aiosqlite
 from pathlib import Path as _Path
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException, Header
+from claw.core.auth import verify_admin_token
+
+
+def _check_admin_auth(authorization: str | None) -> None:
+    """Raise HTTPException 401 if admin token is invalid."""
+    token = ""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if not verify_admin_token(token):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
 @app.get("/admin/egress/pending")
-async def egress_list_pending():
+async def egress_list_pending(authorization: str | None = Header(default=None)):
+    _check_admin_auth(authorization)
     db_path = _Path("~/.claw/claw.db").expanduser()
     async with _aiosqlite.connect(db_path) as db:
         db.row_factory = _aiosqlite.Row
@@ -225,7 +247,8 @@ async def egress_list_pending():
 
 
 @app.post("/admin/egress/{req_id}/approve")
-async def egress_approve(req_id: str, background_tasks: BackgroundTasks):
+async def egress_approve(req_id: str, background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)):
+    _check_admin_auth(authorization)
     db_path = _Path("~/.claw/claw.db").expanduser()
     async with _aiosqlite.connect(db_path) as db:
         db.row_factory = _aiosqlite.Row
@@ -244,7 +267,8 @@ async def egress_approve(req_id: str, background_tasks: BackgroundTasks):
 
 
 @app.get("/admin/egress/audit")
-async def egress_audit_log(limit: int = 100):
+async def egress_audit_log(limit: int = 100, authorization: str | None = Header(default=None)):
+    _check_admin_auth(authorization)
     db_path = _Path("~/.claw/claw.db").expanduser()
     async with _aiosqlite.connect(db_path) as db:
         db.row_factory = _aiosqlite.Row
@@ -254,3 +278,88 @@ async def egress_audit_log(limit: int = 100):
         ) as cur:
             rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Session Admin ────────────────────────────────────────────────────────
+
+@app.get("/admin/sessions")
+async def admin_list_sessions(authorization: str | None = Header(default=None)):
+    """List all sessions with metadata."""
+    _check_admin_auth(authorization)
+    assert storage is not None
+    sessions = await storage.list_sessions()
+    return [
+        {
+            "session_id": s.session_id,
+            "scope": s.scope,
+            "channel": s.channel,
+            "agent_id": s.agent_id,
+            "last_active": s.last_active,
+            "created_at": s.created_at,
+        }
+        for s in sessions
+    ]
+
+
+@app.delete("/admin/sessions/{session_id}")
+async def admin_delete_session(
+    session_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """Force-terminate and delete a session."""
+    _check_admin_auth(authorization)
+    assert storage is not None
+    session = await storage.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
+    await storage.delete_session(session_id)
+    return {"deleted": session_id}
+
+
+# ── Queue Admin ──────────────────────────────────────────────────────────
+
+@app.get("/admin/queue")
+async def admin_queue_status(authorization: str | None = Header(default=None)):
+    """Get message queue status."""
+    _check_admin_auth(authorization)
+    assert queue is not None
+    depth = queue.depth() if hasattr(queue, "depth") else 0
+    return {
+        "depth": depth,
+        "status": "ok",
+    }
+
+
+# ── Skills Admin ─────────────────────────────────────────────────────────
+
+@app.post("/admin/reload-skills")
+async def admin_reload_skills(authorization: str | None = Header(default=None)):
+    """Hot-reload skills directory without restart."""
+    _check_admin_auth(authorization)
+    from claw.skills.loader import load_skills
+    from claw.core.config import get_config
+    cfg = get_config()
+    loaded_count = load_skills(cfg.skills.dir)
+    # load_skills returns None; return best-effort info
+    return {
+        "reloaded": loaded_count if isinstance(loaded_count, int) else 0,
+        "skills": [],
+    }
+
+
+# ── Status ────────────────────────────────────────────────────────────────
+
+@app.get("/admin/status")
+async def admin_status(authorization: str | None = Header(default=None)):
+    """Overall system status."""
+    _check_admin_auth(authorization)
+    assert storage is not None
+    assert queue is not None
+    sessions = await storage.list_sessions()
+    depth = queue.depth() if hasattr(queue, "depth") else 0
+    return {
+        "status": "ok",
+        "sessions_count": len(sessions),
+        "queue_depth": depth,
+    }
+

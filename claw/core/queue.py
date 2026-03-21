@@ -101,3 +101,8 @@ class MessageQueue:
             self._tasks[session_id].cancel()
             del self._tasks[session_id]
         self._lanes.pop(session_id, None)
+
+    def depth(self) -> int:
+        """Return total current queue depth across all lanes."""
+        return sum(lane._queue.qsize() for lane in self._lanes.values())
+

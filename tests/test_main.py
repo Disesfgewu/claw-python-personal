@@ -17,8 +17,9 @@ async def test_main_lifespan_telegram_disabled():
         with patch("claw.main.Storage", return_value=AsyncMock()):
             with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
                 with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
-                    async with lifespan(mock_app):
-                        pass  # No exception
+                    with patch("claw.main.configure_logging"):
+                        async with lifespan(mock_app):
+                            pass  # No exception
 
 
 @pytest.mark.asyncio
@@ -40,13 +41,14 @@ async def test_main_lifespan_telegram_starts():
         with patch("claw.main.Storage", return_value=AsyncMock()):
             with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
                 with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
-                    with patch("claw.channels.telegram.TelegramChannel", return_value=mock_tg):
-                        async with lifespan(mock_app):
-                            pass
+                    with patch("claw.main.configure_logging"):
+                        with patch("claw.channels.telegram.TelegramChannel", return_value=mock_tg):
+                            async with lifespan(mock_app):
+                                pass
 
-                        # Verify start() and stop() were called
-                        mock_tg.start.assert_called_once()
-                        mock_tg.stop.assert_called_once()
+                            # Verify start() and stop() were called
+                            mock_tg.start.assert_called_once()
+                            mock_tg.stop.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -68,12 +70,13 @@ async def test_main_lifespan_slack_starts():
         with patch("claw.main.Storage", return_value=AsyncMock()):
             with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
                 with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
-                    with patch("claw.channels.slack.SlackChannel", return_value=mock_slack):
-                        async with lifespan(mock_app):
-                            pass
+                    with patch("claw.main.configure_logging"):
+                        with patch("claw.channels.slack.SlackChannel", return_value=mock_slack):
+                            async with lifespan(mock_app):
+                                pass
 
-                        mock_slack.start.assert_called_once()
-                        mock_slack.stop.assert_called_once()
+                            mock_slack.start.assert_called_once()
+                            mock_slack.stop.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -93,10 +96,11 @@ async def test_main_lifespan_channel_error_not_fatal():
         with patch("claw.main.Storage", return_value=AsyncMock()):
             with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
                 with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
-                    with patch("claw.channels.telegram.TelegramChannel", side_effect=Exception("Token invalid")):
-                        # 應不拋出異常
-                        async with lifespan(mock_app):
-                            pass
+                    with patch("claw.main.configure_logging"):
+                        with patch("claw.channels.telegram.TelegramChannel", side_effect=Exception("Token invalid")):
+                            # 應不拋出異常
+                            async with lifespan(mock_app):
+                                pass
 
 
 @pytest.mark.asyncio
@@ -114,6 +118,7 @@ async def test_main_lifespan_telegram_empty_token():
         with patch("claw.main.Storage", return_value=AsyncMock()):
             with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
                 with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
-                    # 應不拋出異常，但不啟動 Telegram
-                    async with lifespan(mock_app):
-                        pass
+                    with patch("claw.main.configure_logging"):
+                        # 應不拋出異常，但不啟動 Telegram
+                        async with lifespan(mock_app):
+                            pass

@@ -7,6 +7,8 @@ from claw.core.storage import Storage
 from claw.core.queue import MessageQueue
 from claw.llm.router_client import LLMRouterClient
 from claw.core.config import get_config
+from claw.core.logger import configure_logging
+from claw.core.session_reaper import SessionReaper
 from claw.sandbox.docker_runner import get_runner
 from claw.skills.loader import load_skills
 import claw.core.gateway as gateway_module
@@ -21,6 +23,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = get_config()
+    configure_logging(
+        level=cfg.logging.level,
+        fmt=cfg.logging.format,
+    )
     storage = Storage(
         db_path=cfg.storage.db_path,
         transcript_dir=cfg.storage.transcript_dir,
@@ -53,6 +59,18 @@ async def lifespan(app: FastAPI):
     gateway_module.llm = llm
     if cfg.skills.autoload:
         load_skills(cfg.skills.dir)
+
+    session_cfg = getattr(cfg, "session", None)
+    ttl_hours = getattr(session_cfg, "ttl_hours", 24) if session_cfg else 24
+    interval_seconds = (
+        getattr(session_cfg, "reaper_interval_seconds", 60) if session_cfg else 60
+    )
+    reaper = SessionReaper(
+        storage=storage,
+        ttl_hours=ttl_hours,
+        interval_seconds=interval_seconds,
+    )
+    reaper.start()
 
     channels = []
 
@@ -101,6 +119,8 @@ async def lifespan(app: FastAPI):
                 logger.error(f"Failed to start Slack channel: {e}")
 
     yield
+
+    reaper.stop()
 
     for channel in channels:
         try:
