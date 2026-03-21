@@ -17,7 +17,8 @@
 | Phase 4 | NemoClaw 安全層（Blueprint, Egress Policy, Sandbox 強化, Admin API） | 76 |
 | Phase 5 | Memory/RAG（FTS5 + sqlite-vec）+ Context Compaction | 92 |
 | Phase 6 | Telegram + Slack Channel Adapters | 106 |
-| Phase 7.5 | Code Quality 改善（9.5/10，Pylance 26→6，Optional 清零） | **125** |
+| Phase 7.5 | Code Quality 改善（9.5/10，Pylance 26→6，Optional 清零） | 125 |
+| Phase 7 | Observability（structlog + Prometheus + Admin API v2 + Session Reaper） | **137** |
 
 ---
 
