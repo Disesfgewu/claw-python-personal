@@ -97,3 +97,23 @@ async def test_main_lifespan_channel_error_not_fatal():
                         # 應不拋出異常
                         async with lifespan(mock_app):
                             pass
+
+
+@pytest.mark.asyncio
+async def test_main_lifespan_telegram_empty_token():
+    """Telegram enabled 但 token 為空時應跳過啟動"""
+    mock_app = MagicMock()
+
+    with patch("claw.main.get_config") as mock_get_cfg:
+        mock_cfg = MagicMock()
+        mock_cfg.telegram.enabled = True
+        mock_cfg.telegram.token = ""  # 空 token
+        mock_cfg.slack.enabled = False
+        mock_get_cfg.return_value = mock_cfg
+
+        with patch("claw.main.Storage", return_value=AsyncMock()):
+            with patch("claw.main.LLMRouterClient", return_value=AsyncMock()):
+                with patch("claw.memory.sqlite_store.MemoryStore", return_value=AsyncMock()):
+                    # 應不拋出異常，但不啟動 Telegram
+                    async with lifespan(mock_app):
+                        pass

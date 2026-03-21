@@ -186,3 +186,34 @@ async def test_agent_loop_llm_error(tmp_path):
         events.append(e)
 
     assert any(isinstance(e, RunError) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_memory_recall_empty_list():
+    """Memory recall 返回空列表時應不報錯"""
+    from unittest.mock import AsyncMock, MagicMock
+    from types import SimpleNamespace
+
+    # 準備 mock
+    mock_storage = MagicMock()
+    mock_storage.get_session = AsyncMock(return_value=SimpleNamespace(system_prompt="sys"))
+    mock_storage.get_messages = AsyncMock(return_value=[])
+    mock_storage.append_transcript = MagicMock()
+    mock_storage.add_message = AsyncMock()
+    mock_storage.update_last_active = AsyncMock()
+
+    seq = [StreamChunk(content="done"), StreamChunk(usage={"input": 1})]
+    mock_llm = FakeLLM([seq])
+    
+    mock_memory = AsyncMock()
+    mock_memory.search = AsyncMock(return_value=[])  # 空列表
+
+    loop = AgentLoop(storage=mock_storage, llm=mock_llm, memory=mock_memory)
+
+    # 運行 agent
+    events = []
+    async for event in loop.run(session_id="test", user_message="hello"):
+        events.append(event)
+
+    # 應完成執行，不報錯
+    assert any(isinstance(e, RunComplete) for e in events)

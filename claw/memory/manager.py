@@ -55,12 +55,8 @@ class MemoryManager:
     async def _get_embedding(self, text: str) -> list[float]:
         """Generate embedding via LLM-Router /v1/embeddings. Falls back to zero vector."""
         try:
-            resp = await self.llm._client.post(
-                f"{self.llm.base_url}/v1/embeddings",
-                json={"input": text, "model": "default"},
-            )
-            resp.raise_for_status()
-            return resp.json()["data"][0]["embedding"]
+            embedding = await self.llm.get_embedding(text)
+            return embedding
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
             return [0.0] * _FALLBACK_DIM

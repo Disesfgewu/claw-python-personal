@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 import json
 import asyncio
-from typing import Optional
+from typing import List, Dict, Any
 
 from claw.core.storage import Storage
 from claw.core.queue import MessageQueue, QueueMode
@@ -15,14 +15,17 @@ from claw.core.auth import ws_auth_middleware
 app = FastAPI(title="claw-python gateway")
 
 # --- 依賴注入（由 main.py 設定）---
-storage: Optional[Storage] = None
-queue: Optional[MessageQueue] = None
-llm: Optional[LLMRouterClient] = None
+storage: Storage | None = None
+queue: MessageQueue | None = None
+llm: LLMRouterClient | None = None
 
 
 def _require_dependencies() -> tuple[Storage, MessageQueue, LLMRouterClient]:
     if storage is None or queue is None or llm is None:
         raise RuntimeError("gateway dependencies are not configured")
+    assert storage is not None
+    assert queue is not None
+    assert llm is not None
     return storage, queue, llm
 
 

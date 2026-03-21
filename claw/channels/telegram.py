@@ -41,9 +41,15 @@ class TelegramChannel:
         )
         await self.app.initialize()
         await self.app.start()
-        if self.polling and self.app.updater:
-            await self.app.updater.start_polling()
-        logger.info("TelegramChannel started")
+        if self.polling:
+            updater = self.app.updater
+            if updater is not None:
+                await updater.start_polling()
+                logger.info("TelegramChannel polling started successfully")
+            else:
+                logger.warning("No updater available, polling mode disabled")
+        else:
+            logger.info("TelegramChannel started in webhook mode (not implemented)")
 
     async def stop(self) -> None:
         if not self.app:
@@ -66,9 +72,15 @@ class TelegramChannel:
             response_text = await self._call_gateway(session_id, text)
             if response_text:
                 await self._send_response(chat_id, response_text)
+        except asyncio.TimeoutError:
+            logger.error(f"Gateway timeout for session {session_id}")
+            await self._send_response(chat_id, "Error: Request timeout, please try again")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Gateway HTTP error: {e.response.status_code} - {e.response.text}")
+            await self._send_response(chat_id, f"Error: Gateway returned {e.response.status_code}")
         except Exception as e:
-            logger.error(f"Telegram gateway error: {e}")
-            await self._send_response(chat_id, f"Error: {e}")
+            logger.error(f"Unexpected error in telegram handler", exc_info=True)
+            await self._send_response(chat_id, "Error: Internal server error")
 
     def _get_session_id(self, update: "Update") -> str:
         if update.message.chat.type == "private":

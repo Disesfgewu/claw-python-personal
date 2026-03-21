@@ -57,32 +57,48 @@ async def lifespan(app: FastAPI):
     channels = []
 
     if cfg.telegram.enabled:
-        try:
-            from claw.channels.telegram import TelegramChannel
-            tg = TelegramChannel(
-                token=cfg.telegram.token,
-                base_url=f"http://localhost:{cfg.gateway.port}",
-                polling=cfg.telegram.polling,
+        # ✅ 驗證必需配置
+        if not cfg.telegram.token or not cfg.telegram.token.strip():
+            logger.error(
+                "Telegram is enabled but token is empty or whitespace. "
+                "Set TELEGRAM_TOKEN environment variable or "
+                "configure telegram.token in config/default.yaml"
             )
-            await tg.start()
-            channels.append(tg)
-            logger.info("Telegram channel started")
-        except Exception as e:
-            logger.error(f"Failed to start Telegram channel: {e}")
+        else:
+            try:
+                from claw.channels.telegram import TelegramChannel
+                tg = TelegramChannel(
+                    token=cfg.telegram.token.strip(),
+                    base_url=f"http://localhost:{cfg.gateway.port}",
+                    polling=cfg.telegram.polling,
+                )
+                await tg.start()
+                channels.append(tg)
+                logger.info("Telegram channel started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start Telegram channel: {e}")
 
     if cfg.slack.enabled:
-        try:
-            from claw.channels.slack import SlackChannel
-            slack = SlackChannel(
-                bot_token=cfg.slack.bot_token,
-                app_token=cfg.slack.app_token,
-                base_url=f"http://localhost:{cfg.gateway.port}",
+        # ✅ 驗證必需配置
+        if not cfg.slack.bot_token or not cfg.slack.app_token:
+            logger.error(
+                "Slack is enabled but bot_token or app_token is empty. "
+                "Set SLACK_BOT_TOKEN and SLACK_APP_TOKEN environment variables or "
+                "configure slack.bot_token and slack.app_token in config/default.yaml"
             )
-            await slack.start()
-            channels.append(slack)
-            logger.info("Slack channel started")
-        except Exception as e:
-            logger.error(f"Failed to start Slack channel: {e}")
+        else:
+            try:
+                from claw.channels.slack import SlackChannel
+                slack = SlackChannel(
+                    bot_token=cfg.slack.bot_token.strip(),
+                    app_token=cfg.slack.app_token.strip(),
+                    base_url=f"http://localhost:{cfg.gateway.port}",
+                )
+                await slack.start()
+                channels.append(slack)
+                logger.info("Slack channel started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start Slack channel: {e}")
 
     yield
 

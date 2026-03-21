@@ -1,4 +1,7 @@
 import pytest
+from unittest.mock import AsyncMock
+import sys
+import types
 
 import claw.channels.slack as slack_module
 from claw.channels.slack import SlackChannel
@@ -41,6 +44,33 @@ class FakeClient:
     def stream(self, method, url, json=None, timeout=None):
         self.calls.append({"method": method, "url": url, "json": json})
         return FakeStream(FakeResponse(self._lines))
+
+
+def _install_fake_slack(monkeypatch, handler):
+    slack_mod = types.ModuleType("slack_bolt")
+    async_app_mod = types.ModuleType("slack_bolt.async_app")
+    adapter_mod = types.ModuleType("slack_bolt.adapter")
+    socket_mode_mod = types.ModuleType("slack_bolt.adapter.socket_mode")
+
+    class DummyAsyncApp:
+        def __init__(self, token=None):
+            self.token = token
+
+        def event(self, name):
+            def decorator(fn):
+                return fn
+            return decorator
+
+    async_app_mod.AsyncApp = DummyAsyncApp
+    socket_mode_mod.AsyncSocketModeHandler = lambda *args, **kwargs: handler
+    adapter_mod.socket_mode = socket_mode_mod
+    slack_mod.async_app = async_app_mod
+    slack_mod.adapter = adapter_mod
+
+    monkeypatch.setitem(sys.modules, "slack_bolt", slack_mod)
+    monkeypatch.setitem(sys.modules, "slack_bolt.async_app", async_app_mod)
+    monkeypatch.setitem(sys.modules, "slack_bolt.adapter", adapter_mod)
+    monkeypatch.setitem(sys.modules, "slack_bolt.adapter.socket_mode", socket_mode_mod)
 
 
 def test_slack_dm_session_id():
@@ -95,3 +125,15 @@ async def test_slack_thread_reply():
     await ch._send_response("C1", "hello", thread_ts="123.45")
 
     assert calls == [("C1", "hello", "123.45")]
+
+
+@pytest.mark.asyncio
+async def test_slack_start_fallback_to_old_api(monkeypatch):
+    """start() 當 start_async() 不存在時應回退到 start()"""
+    handler = types.SimpleNamespace(start=AsyncMock())
+    _install_fake_slack(monkeypatch, handler)
+
+    ch = SlackChannel("xoxb-token", "xapp-token")
+    await ch.start()
+
+    handler.start.assert_called_once()

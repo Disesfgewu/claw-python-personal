@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 import httpx
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMRouterError(Exception):
@@ -143,6 +146,33 @@ class LLMRouterClient:
             return {"status": "ok", "model": resp.json().get("model", "")}
         except httpx.HTTPError as e:
             raise LLMRouterError(str(e)) from e
+
+    async def get_embedding(self, text: str) -> list[float]:
+        """
+        Generate embedding via /v1/embeddings endpoint.
+
+        Args:
+            text: Input text to embed
+
+        Returns:
+            Embedding vector as list of floats
+
+        Raises:
+            Exception: If embedding generation fails
+        """
+        try:
+            resp = await self._client.post(
+                f"{self.base_url}/v1/embeddings",
+                json={"input": text, "model": "default"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "data" not in data or len(data["data"]) == 0:
+                raise ValueError("Invalid embedding response format")
+            return data["data"][0]["embedding"]
+        except Exception as e:
+            logger.error(f"Embedding request failed: {e}")
+            raise
 
     async def close(self) -> None:
         await self._client.aclose()

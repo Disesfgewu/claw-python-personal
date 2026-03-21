@@ -1,5 +1,8 @@
 import pytest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+import sys
+import types
 
 import claw.channels.telegram as telegram_module
 from claw.channels.telegram import TelegramChannel
@@ -52,6 +55,45 @@ def _make_update(chat_type: str, chat_id: int, user_id: int, text: str = "hi"):
             from_user=SimpleNamespace(id=user_id),
         )
     )
+
+
+def _install_fake_telegram(monkeypatch, mock_app):
+    telegram_mod = types.ModuleType("telegram")
+    ext_mod = types.ModuleType("telegram.ext")
+
+    class DummyFilters:
+        TEXT = 1
+        PHOTO = 2
+
+        class Document:
+            ALL = 4
+
+    class DummyMessageHandler:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class DummyBuilder:
+        def __init__(self, app):
+            self._app = app
+
+        def token(self, token):
+            return self
+
+        def build(self):
+            return self._app
+
+    class DummyApplication:
+        @classmethod
+        def builder(cls):
+            return DummyBuilder(mock_app)
+
+    ext_mod.Application = DummyApplication
+    ext_mod.MessageHandler = DummyMessageHandler
+    ext_mod.filters = DummyFilters
+    telegram_mod.ext = ext_mod
+
+    monkeypatch.setitem(sys.modules, "telegram", telegram_mod)
+    monkeypatch.setitem(sys.modules, "telegram.ext", ext_mod)
 
 
 def test_telegram_private_message_session_id():
@@ -116,3 +158,19 @@ async def test_telegram_send_response_throttle(monkeypatch):
     assert sent[0][1] == "a" * 4096
     assert sent[1][1] == "a" * (5000 - 4096)
     assert sleeps == [0.5, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_telegram_start_with_polling_enabled(monkeypatch):
+    """start() 在 polling=True 且 updater 存在時應調用 start_polling()"""
+    mock_updater = AsyncMock()
+    mock_app = AsyncMock()
+    mock_app.updater = mock_updater
+    mock_app.add_handler = MagicMock()
+
+    _install_fake_telegram(monkeypatch, mock_app)
+
+    ch = TelegramChannel("test_token", polling=True)
+    await ch.start()
+
+    mock_updater.start_polling.assert_called_once()

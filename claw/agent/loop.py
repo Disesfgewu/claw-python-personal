@@ -95,13 +95,20 @@ class AgentLoop:
         original_user_msg = user_message
         if self.memory:
             try:
-                recalled = await self.memory.search(user_message, session_id=session_id, limit=3)
-                if recalled:
+                recalled = await self.memory.search(
+                    user_message,
+                    session_id=session_id,
+                    limit=3
+                )
+                # 明確檢查 recalled 非空
+                if recalled and len(recalled) > 0:
                     memory_lines = "\n".join(
-                        f"[Memory {i+1}] {r['content'][:300]}"
-                        for i, r in enumerate(recalled)
+                        f"[Memory {i+1}] {item.get('content', '')[:300]}"
+                        for i, item in enumerate(recalled)
                     )
-                    user_message = f"Relevant memories:\n{memory_lines}\n\n---\n{user_message}"
+                    if memory_lines:
+                        sys_prompt += f"\n\n=== Recalled Memories ===\n{memory_lines}"
+                        logger.debug(f"Recalled {len(recalled)} memories for session {session_id}")
             except Exception as e:
                 logger.warning(f"Memory recall failed: {e}")
 

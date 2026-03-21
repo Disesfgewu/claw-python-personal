@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -45,11 +46,12 @@ class SlackChannel:
                 await self._on_direct_message(event)
 
         self._socket_handler = AsyncSocketModeHandler(self.app, self.app_token)
-        if hasattr(self._socket_handler, "start_async"):
+        try:
             await self._socket_handler.start_async()
-        else:
+            logger.info("SlackChannel started with start_async() (new API)")
+        except AttributeError:
+            logger.info("Using legacy SlackChannel.start() method (old API)")
             await self._socket_handler.start()
-        logger.info("SlackChannel started")
 
     async def stop(self) -> None:
         if not self._socket_handler:
@@ -59,7 +61,7 @@ class SlackChannel:
         else:
             await self._socket_handler.close()
 
-    async def _on_app_mention(self, event: dict) -> None:
+    async def _on_app_mention(self, event: dict[str, Any]) -> None:
         channel = event.get("channel")
         text = event.get("text", "")
         thread_ts = event.get("thread_ts")
@@ -71,11 +73,17 @@ class SlackChannel:
             response_text = await self._call_gateway(session_id, text)
             if response_text:
                 await self._send_response(channel, response_text, thread_ts=thread_ts)
+        except asyncio.TimeoutError:
+            logger.error(f"Gateway timeout for session {session_id}")
+            await self._send_response(channel, "Error: Request timeout", thread_ts=thread_ts)
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Gateway HTTP error: {e.response.status_code}")
+            await self._send_response(channel, f"Error: Gateway returned {e.response.status_code}", thread_ts=thread_ts)
         except Exception as e:
-            logger.error(f"Slack gateway error: {e}")
-            await self._send_response(channel, f"Error: {e}", thread_ts=thread_ts)
+            logger.error(f"Unexpected error in slack handler", exc_info=True)
+            await self._send_response(channel, "Error: Internal server error", thread_ts=thread_ts)
 
-    async def _on_direct_message(self, event: dict) -> None:
+    async def _on_direct_message(self, event: dict[str, Any]) -> None:
         channel = event.get("channel")
         text = event.get("text", "")
         if not channel or not text:
@@ -86,11 +94,17 @@ class SlackChannel:
             response_text = await self._call_gateway(session_id, text)
             if response_text:
                 await self._send_response(channel, response_text, thread_ts=event.get("thread_ts"))
+        except asyncio.TimeoutError:
+            logger.error(f"Gateway timeout for session {session_id}")
+            await self._send_response(channel, "Error: Request timeout", thread_ts=event.get("thread_ts"))
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Gateway HTTP error: {e.response.status_code}")
+            await self._send_response(channel, f"Error: Gateway returned {e.response.status_code}", thread_ts=event.get("thread_ts"))
         except Exception as e:
-            logger.error(f"Slack gateway error: {e}")
-            await self._send_response(channel, f"Error: {e}", thread_ts=event.get("thread_ts"))
+            logger.error(f"Unexpected error in slack handler", exc_info=True)
+            await self._send_response(channel, "Error: Internal server error", thread_ts=event.get("thread_ts"))
 
-    def _get_session_id(self, event: dict) -> str:
+    def _get_session_id(self, event: dict[str, Any]) -> str:
         channel = event["channel"]
         user = event["user"]
         if channel.startswith("D"):

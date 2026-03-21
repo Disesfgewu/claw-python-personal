@@ -2,6 +2,7 @@ import json
 import pytest
 import httpx
 import respx
+from unittest.mock import AsyncMock, MagicMock
 
 from claw.llm.router_client import (
     LLMRouterClient, CompletionRequest, ChatMessage, StreamChunk, LLMRouterError
@@ -116,3 +117,23 @@ async def test_health_check_error():
     with pytest.raises(LLMRouterError):
         await client.health_check()
     await client.close()
+
+
+@pytest.mark.asyncio
+async def test_llm_router_get_embedding_success(monkeypatch):
+    """get_embedding() 應正確返回嵌入向量"""
+    client = LLMRouterClient(base_url="http://localhost:8000")
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "data": [{"embedding": [0.1, 0.2, 0.3]}]
+    }
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_post = AsyncMock(return_value=mock_resp)
+    monkeypatch.setattr(client._client, "post", mock_post)
+
+    result = await client.get_embedding("test text")
+
+    assert result == [0.1, 0.2, 0.3]
+    mock_post.assert_called_once()

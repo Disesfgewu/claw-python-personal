@@ -86,3 +86,24 @@ async def test_chat_completions_stream(tmp_path):
 
     assert any(line.startswith("data: ") for line in lines)
     assert any("[DONE]" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_require_dependencies_with_all_none():
+    """_require_dependencies 在所有依賴都是 None 時應拋出異常"""
+    import claw.core.gateway as gw
+    original_storage = gw.storage
+    original_queue = gw.queue
+    original_llm = gw.llm
+
+    try:
+        gw.storage = None
+        gw.queue = None
+        gw.llm = None
+
+        with pytest.raises(RuntimeError, match="dependencies are not configured"):
+            gw._require_dependencies()
+    finally:
+        gw.storage = original_storage
+        gw.queue = original_queue
+        gw.llm = original_llm
