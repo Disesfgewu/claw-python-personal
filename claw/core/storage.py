@@ -40,6 +40,33 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session
     ON messages(session_id, created_at DESC);
+
+-- Research framework tables (Phase 9)
+CREATE TABLE IF NOT EXISTS research_tasks (
+    task_id      TEXT PRIMARY KEY,
+    question     TEXT NOT NULL,
+    criteria     TEXT,
+    eval_cmd     TEXT,
+    status       TEXT NOT NULL DEFAULT 'running',
+    max_exp      INTEGER NOT NULL DEFAULT 20,
+    created_at   TEXT NOT NULL,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS research_experiments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id     TEXT NOT NULL REFERENCES research_tasks(task_id),
+    hypothesis  TEXT NOT NULL,
+    approach    TEXT NOT NULL,
+    output      TEXT NOT NULL DEFAULT '',
+    metric      REAL,
+    status      TEXT NOT NULL,
+    reasoning   TEXT NOT NULL DEFAULT '',
+    ts          TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_exp_task
+    ON research_experiments(task_id, ts DESC);
 """
 
 
