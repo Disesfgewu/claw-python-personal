@@ -1,19 +1,23 @@
 # claw-python 開發路線圖（NemoClaw 整合後修訂版）
 
-> 更新日期：2026-03-20
+> 更新日期：2026-03-21
 > 硬體：Jetson Orin Nano Super（8GB unified memory, kernel 5.15.136-tegra）
-> 基準：Phase 3 完成，64 tests 通過
+> 當前狀態：Phase 7.5 完成，**125 tests 通過**，進行中：Phase 7 Observability
 
 ---
 
 ## 已完成
 
-| Phase | 內容 | Tests |
+| Phase | 內容 | 累計 Tests |
 |---|---|---|
 | Phase 1 | Core（Storage, LLM-Router Client, Tool Registry, Agent Loop, Queue, Gateway） | 20 |
-| Phase 2 | Docker Sandbox, Hook System, Skills Loader, Security Pairing, Config System | +34 |
-| Phase 2.5 | Skills 目錄重構（44 skills，品牌清理，manifest 標準化） | 0 new |
-| Phase 3 | Slash Commands, Cron, Multi-agent ACP, Media Layer, Channel Abstraction | +10 |
+| Phase 2 | Docker Sandbox, Hook System, Skills Loader, Security Pairing, Config System | 54 |
+| Phase 2.5 | Skills 目錄重構（44 skills，品牌清理，manifest 標準化） | 54 |
+| Phase 3 | Slash Commands, Cron, Multi-agent ACP, Media Layer, Channel Abstraction | 64 |
+| Phase 4 | NemoClaw 安全層（Blueprint, Egress Policy, Sandbox 強化, Admin API） | 76 |
+| Phase 5 | Memory/RAG（FTS5 + sqlite-vec）+ Context Compaction | 92 |
+| Phase 6 | Telegram + Slack Channel Adapters | 106 |
+| Phase 7.5 | Code Quality 改善（9.5/10，Pylance 26→6，Optional 清零） | **125** |
 
 ---
 
