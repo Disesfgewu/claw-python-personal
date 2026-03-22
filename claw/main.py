@@ -19,6 +19,8 @@ import claw.tools.web_fetch      # 觸發 web_fetch tool 的注冊
 import claw.tools.file_tools     # 觸發 file_read/write/list/delete 工具注冊
 import claw.tools.research_tools  # 觸發 research_start/experiment_record/research_status 工具注冊
 import claw.tools.cron           # 觸發 cron_add/list/delete 工具注冊
+import claw.tools.image_gen      # 觸發 image_gen tool 的注冊
+import claw.tools.browser         # 觸發 browser_navigate/extract/close 工具注冊
 import logging
 
 logger = logging.getLogger(__name__)
@@ -172,6 +174,26 @@ async def lifespan(app: FastAPI):
                 logger.info("Slack channel started successfully")
             except Exception as e:
                 logger.error(f"Failed to start Slack channel: {e}")
+
+    if cfg.discord.enabled:
+        if not cfg.discord.token or not cfg.discord.token.strip():
+            logger.error(
+                "Discord is enabled but token is empty. "
+                "Set DISCORD_TOKEN environment variable or "
+                "configure discord.token in config/default.yaml"
+            )
+        else:
+            try:
+                from claw.channels.discord import DiscordChannel
+                discord = DiscordChannel(
+                    token=cfg.discord.token.strip(),
+                    base_url=f"http://localhost:{cfg.gateway.port}",
+                )
+                await discord.start()
+                channels.append(discord)
+                logger.info("Discord channel started successfully")
+            except Exception as e:
+                logger.error(f"Failed to start Discord channel: {e}")
 
     yield
 

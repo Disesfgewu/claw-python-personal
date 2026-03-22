@@ -49,3 +49,8 @@ mcp:
   #   transport: sse
   #   url: "http://localhost:3001"
   #   enabled: true
+
+discord:
+  enabled: false
+  token: ""
+  # Set DISCORD_TOKEN env var or token here

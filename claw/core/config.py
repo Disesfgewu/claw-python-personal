@@ -76,6 +76,12 @@ class SlackConfig:
 
 
 @dataclass
+class DiscordConfig:
+    enabled: bool = False
+    token: str = ""
+
+
+@dataclass
 class ClawConfig:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     llm_router: LLMRouterConfig = field(default_factory=LLMRouterConfig)
@@ -86,6 +92,7 @@ class ClawConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
     def get_agent(self, agent_id: str) -> AgentConfig:
         return self.agents.get(agent_id) or self.agents.get("default") or AgentConfig()
 
@@ -111,6 +118,7 @@ def load_config(path: str = "config/default.yaml") -> ClawConfig:
         logging=LoggingConfig(**raw.get("logging", {})),
         telegram=TelegramConfig(**raw.get("telegram", {})),
         slack=SlackConfig(**raw.get("slack", {})),
+        discord=DiscordConfig(**raw.get("discord", {})),
     )
 
     agents_raw = raw.get("agents") or {"default": {}}
