@@ -18,6 +18,7 @@ import claw.tools.memory_tools  # 觸發 memory_save / memory_search 工具注�
 import claw.tools.web_fetch      # 觸發 web_fetch tool 的注冊
 import claw.tools.file_tools     # 觸發 file_read/write/list/delete 工具注冊
 import claw.tools.research_tools  # 觸發 research_start/experiment_record/research_status 工具注冊
+import claw.tools.cron           # 觸發 cron_add/list/delete 工具注冊
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,33 @@ async def lifespan(app: FastAPI):
             count = await mcp_bridge.load_servers(mcp_server_configs)
             logger.info(f"MCPBridge loaded {count} tools from {len(mcp_server_configs)} servers")
     set_mcp_bridge(mcp_bridge)
+
+    # CronService 初始化
+    from claw.cron.store import CronStore
+    from claw.cron.service import CronService
+    from claw.tools.cron import set_cron_service
+    cron_store = CronStore(db_path=cfg.storage.db_path)
+    await cron_store.init()
+    cron_service = CronService(store=cron_store, storage=storage, llm=llm)
+    await cron_service.start()
+    set_cron_service(cron_service)
+    logger.info("CronService initialized and started")
+
+    # EgressPolicy 初始化（從 config/egress_policy.yaml 載入白名單）
+    from claw.tools.policy import EgressPolicy, set_egress_policy
+    from pathlib import Path
+    egress_policy_path = Path("config/egress_policy.yaml")
+    if egress_policy_path.exists():
+        egress_policy = EgressPolicy.from_yaml(egress_policy_path, db_path=cfg.storage.db_path)
+        set_egress_policy(egress_policy)
+        logger.info(f"EgressPolicy loaded from {egress_policy_path} with {len(egress_policy.rules)} rules")
+    else:
+        egress_policy = EgressPolicy(db_path=cfg.storage.db_path)
+        set_egress_policy(egress_policy)
+        logger.warning(f"EgressPolicy config not found at {egress_policy_path}, using default (DENY all)")
+
+    # 將 egress_policy 暴露給 gateway（供 AgentLoop 使用）
+    gateway_module.egress_policy = egress_policy
 
     gateway_module.storage = storage
     gateway_module.queue = MessageQueue()
@@ -149,6 +177,7 @@ async def lifespan(app: FastAPI):
 
     reaper.stop()
 
+    await cron_service.stop()
     await mcp_bridge.close_all()
 
     for channel in channels:

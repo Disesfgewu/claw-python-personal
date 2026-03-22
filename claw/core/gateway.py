@@ -18,6 +18,8 @@ app = FastAPI(title="claw-python gateway")
 storage: Storage | None = None
 queue: MessageQueue | None = None
 llm: LLMRouterClient | None = None
+memory = None
+egress_policy = None
 
 
 def _require_dependencies() -> tuple[Storage, MessageQueue, LLMRouterClient]:
@@ -33,7 +35,8 @@ def get_agent_loop() -> AgentLoop:
     storage_impl, _, llm_impl = _require_dependencies()
     import claw.core.gateway as _gw
     mem = getattr(_gw, 'memory', None)
-    return AgentLoop(storage=storage_impl, llm=llm_impl, memory=mem)
+    egress = getattr(_gw, 'egress_policy', None)
+    return AgentLoop(storage=storage_impl, llm=llm_impl, memory=mem, egress=egress)
 
 
 # --- WebSocket 控制平面 ---
