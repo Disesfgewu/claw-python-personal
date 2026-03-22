@@ -21,6 +21,7 @@ import claw.tools.research_tools  # 觸發 research_start/experiment_record/rese
 import claw.tools.cron           # 觸發 cron_add/list/delete 工具注冊
 import claw.tools.image_gen      # 觸發 image_gen tool 的注冊
 import claw.tools.browser         # 觸發 browser_navigate/extract/close 工具注冊
+import claw.tools.sessions_tools  # 觸發 sessions_send/spawn/list 工具注冊
 import logging
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ async def lifespan(app: FastAPI):
 
     # Memory 初始化
     mem_db_path = os.path.join(
-        os.path.dirname(os.path.expanduser(cfg.storage.db_path)),
+        os.path.dirname(storage.db_path),
         "memory.db"
     )
     mem_store = MemoryStore(db_path=mem_db_path)
@@ -88,7 +89,7 @@ async def lifespan(app: FastAPI):
     from claw.cron.store import CronStore
     from claw.cron.service import CronService
     from claw.tools.cron import set_cron_service
-    cron_store = CronStore(db_path=cfg.storage.db_path)
+    cron_store = CronStore(db_path=storage.db_path)
     await cron_store.init()
     cron_service = CronService(store=cron_store, storage=storage, llm=llm)
     await cron_service.start()
@@ -100,16 +101,23 @@ async def lifespan(app: FastAPI):
     from pathlib import Path
     egress_policy_path = Path("config/egress_policy.yaml")
     if egress_policy_path.exists():
-        egress_policy = EgressPolicy.from_yaml(egress_policy_path, db_path=cfg.storage.db_path)
+        egress_policy = EgressPolicy.from_yaml(egress_policy_path, db_path=storage.db_path)
         set_egress_policy(egress_policy)
         logger.info(f"EgressPolicy loaded from {egress_policy_path} with {len(egress_policy.rules)} rules")
     else:
-        egress_policy = EgressPolicy(db_path=cfg.storage.db_path)
+        egress_policy = EgressPolicy(db_path=storage.db_path)
         set_egress_policy(egress_policy)
         logger.warning(f"EgressPolicy config not found at {egress_policy_path}, using default (DENY all)")
 
     # 將 egress_policy 暴露給 gateway（供 AgentLoop 使用）
     gateway_module.egress_policy = egress_policy
+
+    # MultiAgentCoordinator 初始化（連接 sessions_send/spawn/list 工具）
+    from claw.agent.multi_agent import MultiAgentCoordinator
+    from claw.tools.sessions_tools import set_coordinator
+    coordinator = MultiAgentCoordinator(storage=storage, llm=llm)
+    set_coordinator(coordinator)
+    logger.info("MultiAgentCoordinator initialized")
 
     gateway_module.storage = storage
     gateway_module.queue = MessageQueue()

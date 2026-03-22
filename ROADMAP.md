@@ -1,8 +1,8 @@
 # claw-python 開發路線圖（NemoClaw 整合後修訂版）
 
-> 更新日期：2026-03-21
+> 更新日期：2026-03-22
 > 硬體：Jetson Orin Nano Super（8GB unified memory, kernel 5.15.136-tegra）
-> 當前狀態：Phase 8a 完成，**135 tests 通過**
+> 當前狀態：Phase 15 完成，**167+ tests 通過**
 
 ---
 
@@ -19,7 +19,15 @@
 | Phase 6 | Telegram + Slack Channel Adapters | 106 |
 | Phase 7.5 | Code Quality 改善（9.5/10，Pylance 26→6，Optional 清零） | 125 |
 | Phase 7 | Observability（structlog + Prometheus + Admin API v2 + Session Reaper） | 125 |
-| Phase 8a | 安全修補 + web_fetch + file_tools + bash egress + memory 隔離 | **135** |
+| Phase 8a | 安全修補 + web_fetch + file_tools + bash egress + memory 隔離 | 135 |
+| Phase 9b | ResearchLoop → AgentLoop 接線 | 148 |
+| Phase 10 | MCP Bridge (stdio + SSE) | 151 |
+| Phase 10.5 | Production 接線 (Cron, EgressPolicy, embedding model) | 157 |
+| Phase 11 | Wiring 補全 (Cron + EgressPolicy + MultiAgent scaffold) | 157 |
+| Phase 12 | Image Generation Tool | 160 |
+| Phase 13 | Browser Tool (Playwright) | 164 |
+| Phase 14 | Discord Channel | 167 |
+| Phase 15 | 完工收尾 (README/ROADMAP 更新, cleanup) | **167+** |
 
 ---
 
