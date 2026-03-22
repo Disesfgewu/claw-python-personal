@@ -44,10 +44,16 @@ class ResearchLoop:
       Planner → execute → evaluate (A→C→B) → keep/discard → iterate
     """
 
-    def __init__(self, llm, ledger: ResearchLedger | None = None):
+    def __init__(
+        self,
+        llm,
+        ledger: ResearchLedger | None = None,
+        agent_loop=None,   # AgentLoop | None — 若提供則用於真實工具執行
+    ):
         self.llm = llm
         self.ledger = ledger or ResearchLedger()
         self.planner = ResearchPlanner(llm)
+        self.agent_loop = agent_loop  # Optional[AgentLoop]
 
     async def run(
         self,
@@ -114,27 +120,94 @@ class ResearchLoop:
         yield ResearchExhausted(task_id, [r for r in all_results if r.status == ExperimentStatus.KEEP])
 
     async def _execute(self, hypothesis: str, session_id: str) -> tuple[str, str]:
-        """Ask LLM to execute the hypothesis using available tools. Returns (approach, output)."""
+        """
+        Execute a research hypothesis.
+        If agent_loop is available, use it (real tool calls).
+        Otherwise fall back to direct LLM generation.
+        """
+        if self.agent_loop is not None:
+            return await self._execute_via_agent(hypothesis, session_id)
+        return await self._execute_via_llm(hypothesis)
+
+    async def _execute_via_agent(self, hypothesis: str, session_id: str) -> tuple[str, str]:
+        """Run hypothesis through AgentLoop so tools are available."""
+        from claw.core.storage import SessionRow
+        from claw.agent.events import TextChunk, ToolCallResult, RunComplete, RunError
+        from datetime import datetime, timezone
+
+        # Create a temporary sub-session for this experiment
+        sub_session_id = f"research:{session_id}:{hypothesis[:20].replace(' ', '_')}"
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Ensure sub-session exists in storage
+        existing = await self.agent_loop.storage.get_session(sub_session_id)
+        if existing is None:
+            await self.agent_loop.storage.create_session(SessionRow(
+                session_id=sub_session_id,
+                scope="research",
+                channel="internal",
+                agent_id="research",
+                system_prompt=None,
+                queue_mode="collect",
+                sandbox=False,
+                created_at=now,
+                last_active=now,
+                config={},
+            ))
+
+        prompt = (
+            f"Research hypothesis to investigate:\n\n"
+            f"{hypothesis}\n\n"
+            f"Use available tools (web_fetch, bash, file_read, memory_search) as needed. "
+            f"Report your findings concisely in 2-3 sentences."
+        )
+
+        text_parts: list[str] = []
+        tool_summaries: list[str] = []
+
+        async for event in self.agent_loop.run(
+            session_id=sub_session_id,
+            user_message=prompt,
+            model="auto",
+        ):
+            if isinstance(event, TextChunk):
+                text_parts.append(event.content)
+            elif isinstance(event, ToolCallResult):
+                # Summarise tool output (truncate)
+                summary = f"[{event.name}] {str(event.result)[:200]}"
+                tool_summaries.append(summary)
+            elif isinstance(event, RunError):
+                logger.warning(f"research sub-session error: {event.error}")
+            elif isinstance(event, RunComplete):
+                pass
+
+        output_parts = tool_summaries + text_parts
+        output = "\n".join(output_parts).strip() or "(no output)"
+        approach = "AgentLoop sub-session with tools"
+        return approach, output
+
+    async def _execute_via_llm(self, hypothesis: str) -> tuple[str, str]:
+        """Fallback: direct LLM stream without tool execution."""
         from claw.llm.router_client import CompletionRequest, ChatMessage
         prompt = (
-            f"Execute this research hypothesis and report findings:\n\n"
+            f"Analyze this research hypothesis and report findings:\n\n"
             f"Hypothesis: {hypothesis}\n\n"
-            f"Use available tools (web_fetch, bash, file_read, memory_search) as needed. "
-            f"Report your findings concisely."
+            f"Be concise and factual."
         )
         req = CompletionRequest(
             messages=[ChatMessage(role="user", content=prompt)],
             model="auto",
-            max_tokens=1024,
+            max_tokens=512,
         )
         buf = ""
         async for chunk in self.llm.stream(req):
             if chunk.content:
                 buf += chunk.content
-        return hypothesis, buf.strip()
+        return "direct-llm", buf.strip()
 
     async def _run_eval_cmd(self, eval_cmd: str) -> float | None:
         """Run eval_cmd. Returns float from stdout or 0.0/1.0 from exit code."""
+        proc = None
         try:
             proc = await asyncio.create_subprocess_shell(
                 eval_cmd,
@@ -150,6 +223,13 @@ class ResearchLoop:
         except Exception as e:
             logger.warning(f"eval_cmd failed: {e}")
             return None
+        finally:
+            if proc is not None and proc.returncode is None:
+                try:
+                    proc.kill()
+                    await asyncio.wait_for(proc.wait(), timeout=3)
+                except Exception:
+                    pass
 
     async def _evaluate(
         self,
@@ -244,3 +324,20 @@ def get_research_loop() -> ResearchLoop | None:
 def set_research_loop(loop: ResearchLoop) -> None:
     global _loop
     _loop = loop
+
+
+def init_research_loop(llm, storage=None, egress=None, memory=None) -> ResearchLoop:
+    """
+    Convenience factory: builds AgentLoop internally so ResearchLoop can use tools.
+    Call this from main.py instead of constructing manually.
+    """
+    from claw.agent.loop import AgentLoop
+    from claw.research.ledger import ResearchLedger
+
+    agent_loop = None
+    if storage is not None:
+        agent_loop = AgentLoop(storage=storage, llm=llm, egress=egress, memory=memory)
+
+    loop = ResearchLoop(llm=llm, agent_loop=agent_loop)
+    set_research_loop(loop)
+    return loop
