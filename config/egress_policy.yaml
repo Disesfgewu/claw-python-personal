@@ -15,3 +15,20 @@ egress_rules:
   - dest: "html.duckduckgo.com"
     methods: [GET]
     verdict: allow
+
+  # 新增：台股資料源（股票分析系統用）
+  - dest: "query.sse.com.tw"
+    verdict: allow  # TWSE 官方 API —— 歷史行情查詢
+
+  - dest: "mds.twse.com.tw"
+    verdict: allow  # TWSE 行情資料伺服器
+
+  - dest: "query1.finance.yahoo.com"
+    verdict: allow  # Yahoo Finance 備用源
+
+  - dest: "finance.yahoo.com"
+    verdict: allow  # Yahoo Finance 主源
+
+  # 可選：AKShare（用於財報資料，非必須）
+  # - dest: "api.akshare.com"
+  #   verdict: allow

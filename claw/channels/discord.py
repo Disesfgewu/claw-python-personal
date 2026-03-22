@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import json
+import io
 from typing import TYPE_CHECKING
 
 import discord
@@ -163,3 +164,93 @@ class DiscordChannel:
                     await asyncio.sleep(2)
             except Exception as e:
                 logger.error(f"Failed to show typing indicator: {e}")
+
+    async def send_embed(
+        self,
+        session_id: str,
+        embed: discord.Embed
+    ) -> None:
+        """Send a Discord Embed to session's channel."""
+        channel = self._session_clients.get(session_id)
+        if channel is None:
+            logger.warning(f"No channel found for session {session_id}")
+            return
+        try:
+            await channel.send(embed=embed)
+        except Exception as e:
+            logger.error(f"Failed to send embed to {session_id}: {e}")
+
+    async def send_file(
+        self,
+        session_id: str,
+        file_bytes: bytes,
+        filename: str,
+        caption: str = ""
+    ) -> None:
+        """Send a file attachment (e.g., chart image) to session's channel."""
+        channel = self._session_clients.get(session_id)
+        if channel is None:
+            logger.warning(f"No channel found for session {session_id}")
+            return
+        try:
+            file = discord.File(
+                io.BytesIO(file_bytes),
+                filename=filename
+            )
+            await channel.send(content=caption, file=file)
+        except Exception as e:
+            logger.error(f"Failed to send file to {session_id}: {e}")
+
+    async def send_embed_with_file(
+        self,
+        session_id: str,
+        embed: discord.Embed,
+        file_bytes: bytes,
+        filename: str
+    ) -> None:
+        """Send Embed + File together (for stock reports with charts)."""
+        channel = self._session_clients.get(session_id)
+        if channel is None:
+            logger.warning(f"No channel found for session {session_id}")
+            return
+        try:
+            file = discord.File(
+                io.BytesIO(file_bytes),
+                filename=filename
+            )
+            await channel.send(embed=embed, file=file)
+        except Exception as e:
+            logger.error(f"Failed to send embed+file to {session_id}: {e}")
+
+    async def send_to_channel_id(
+        self,
+        channel_id: int,
+        embed: discord.Embed = None,
+        text: str = None,
+        file_bytes: bytes = None,
+        filename: str = None
+    ) -> None:
+        """
+        Proactive push to a specific channel ID (for Cron jobs).
+        Used by scheduled tasks to push morning/evening reports.
+        """
+        try:
+            channel = await self.bot.fetch_channel(channel_id)
+            if embed and file_bytes:
+                file = discord.File(
+                    io.BytesIO(file_bytes),
+                    filename=filename
+                )
+                await channel.send(embed=embed, file=file)
+            elif embed:
+                await channel.send(embed=embed)
+            elif file_bytes:
+                file = discord.File(
+                    io.BytesIO(file_bytes),
+                    filename=filename
+                )
+                await channel.send(content=text or "", file=file)
+            elif text:
+                await channel.send(text)
+        except Exception as e:
+            logger.error(f"Failed to send to channel {channel_id}: {e}")

@@ -54,3 +54,6 @@ discord:
   enabled: false
   token: ""
   # Set DISCORD_TOKEN env var or token here
+  # Cron jobs 用的 channel IDs（可選）
+  stock_channel_id: 0       # 股票分析頻道
+  morning_report_channel_id: 0  # 晨報頻道（可選，沒設就用 stock_channel_id）

@@ -79,6 +79,8 @@ class SlackConfig:
 class DiscordConfig:
     enabled: bool = False
     token: str = ""
+    stock_channel_id: int = 0
+    morning_report_channel_id: int = 0
 
 
 @dataclass
