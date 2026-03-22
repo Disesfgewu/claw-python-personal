@@ -52,6 +52,11 @@ def get_definitions(session_is_main: bool = False) -> list[dict]:
     return specs
 
 
+def get_tools() -> list[ToolSpec]:
+    """Return a list of all registered tools."""
+    return list(_registry.values())
+
+
 async def execute(
     name: str,
     arguments: dict,

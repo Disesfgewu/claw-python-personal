@@ -15,6 +15,9 @@ import claw.core.gateway as gateway_module
 import claw.tools.bash    # 觸發 bash tool 的注冊
 import claw.tools.search  # 觸發 search_web tool 的注冊
 import claw.tools.memory_tools  # 觸發 memory_save / memory_search 工具注冊
+import claw.tools.web_fetch      # 觸發 web_fetch tool 的注冊
+import claw.tools.file_tools     # 觸發 file_read/write/list/delete 工具注冊
+import claw.tools.research_tools  # 觸發 research_start/experiment_record/research_status 工具注冊
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,6 +56,30 @@ async def lifespan(app: FastAPI):
     memory_manager = MemoryManager(store=mem_store, llm=llm)
     _mem_tools.set_memory_manager(memory_manager)
     gateway_module.memory = memory_manager
+
+    # ResearchLoop 初始化（AutoResearch 功能）
+    from claw.research.loop import init_research_loop
+    init_research_loop(llm=llm, storage=storage, memory=memory_manager)
+    logger.info("ResearchLoop initialized")
+
+    # MCP Bridge 初始化（連接外部 MCP servers）
+    from claw.tools.mcp_bridge import MCPBridge, MCPServerConfig, set_mcp_bridge
+    mcp_bridge = MCPBridge()
+    if hasattr(cfg, "mcp") and cfg.mcp and hasattr(cfg.mcp, "servers"):
+        mcp_server_configs = []
+        for s in (cfg.mcp.servers or []):
+            if isinstance(s, dict) and s.get("enabled", True):
+                mcp_server_configs.append(MCPServerConfig(
+                    name=s.get("name", "unknown"),
+                    transport=s.get("transport", "stdio"),
+                    command=s.get("command", []),
+                    url=s.get("url", ""),
+                    enabled=s.get("enabled", True),
+                ))
+        if mcp_server_configs:
+            count = await mcp_bridge.load_servers(mcp_server_configs)
+            logger.info(f"MCPBridge loaded {count} tools from {len(mcp_server_configs)} servers")
+    set_mcp_bridge(mcp_bridge)
 
     gateway_module.storage = storage
     gateway_module.queue = MessageQueue()
@@ -121,6 +148,8 @@ async def lifespan(app: FastAPI):
     yield
 
     reaper.stop()
+
+    await mcp_bridge.close_all()
 
     for channel in channels:
         try:

@@ -163,7 +163,7 @@ class LLMRouterClient:
         try:
             resp = await self._client.post(
                 f"{self.base_url}/v1/embeddings",
-                json={"input": text, "model": "default"},
+                json={"input": text, "model": "gemini-embedding-2-preview"},
             )
             resp.raise_for_status()
             data = resp.json()
