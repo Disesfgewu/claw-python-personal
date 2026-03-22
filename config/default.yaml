@@ -37,3 +37,15 @@ storage:
 logging:
   level: "INFO"            # DEBUG | INFO | WARNING | ERROR
   format: "json"           # json | text
+
+mcp:
+  servers: []
+  # 範例（取消註解以啟用）：
+  # - name: filesystem
+  #   transport: stdio
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  #   enabled: true
+  # - name: my-sse-server
+  #   transport: sse
+  #   url: "http://localhost:3001"
+  #   enabled: true

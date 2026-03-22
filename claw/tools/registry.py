@@ -81,3 +81,30 @@ async def execute(
         return str(result)
     except Exception as e:
         return f"Error: {e}"
+
+
+class ToolRegistry:
+    def register_dynamic(
+        self,
+        name: str,
+        description: str,
+        parameters: dict,
+        fn: Callable,
+    ) -> None:
+        """Register a dynamically-created tool function (e.g. from MCP bridge)."""
+        _registry[name] = ToolSpec(
+            name=name,
+            description=description,
+            parameters=parameters,
+            handler=fn,
+            requires_main=False,
+        )
+
+    def list_tools(self) -> list[ToolSpec]:
+        """Return a list of all registered tools."""
+        return list(_registry.values())
+
+_registry_instance = ToolRegistry()
+
+def get_registry() -> ToolRegistry:
+    return _registry_instance
