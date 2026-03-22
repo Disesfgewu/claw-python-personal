@@ -3,8 +3,54 @@
 OpenClaw 的 Python 完整復刻，並整合 **NemoClaw 企業安全層**。以 [LLM-Router](https://github.com/Disesfgewu/LLM-Router) 作為唯一 LLM 閘道，透過 DDGS 實現免費搜尋，用 Docker 隔離 tool 執行環境。
 
 > **硬體基準：** Jetson Orin Nano Super（8GB unified memory, JetPack 6.x, kernel 5.15.136-tegra）
-> **當前狀態：** Phase 15 完成 — 167+ tests pass | AutoResearch + MCP Bridge + Browser + Image Gen + Discord | Jetson JetPack 6 ready
-> **代碼品質：** 8.4 → 9.5/10 (+1.1) | Pylance Issues: 26 → 6 (77% resolved) | Type Safety: 95%+ | Optional[X]: 0 occurrences
+> **當前狀態：** Phase 15 完成 — 183 tests pass | All 22 tools + 3 channels fully operational | ResearchLoop + MCP Bridge + Cron Service + EgressPolicy + MultiAgentCoordinator all wired | Server verified on Jetson JetPack 6
+
+## 功能清單（完整）
+
+### ✅ Core 組件（Phase 1-11）
+- FastAPI Gateway with WebSocket
+- Session management + reaper
+- AgentLoop with tool dispatch
+- Memory RAG (sqlite-vec + FTS5 + RRF)
+- EgressPolicy + Docker sandbox + seccomp
+- ResearchLoop with A→C→B evaluation
+- MCP Bridge (stdio + SSE)
+- CronService (schedule management)
+- MultiAgentCoordinator (sessions)
+
+### ✅ 渠道（Channel）— 3 個（Phase 6 + 14）
+- Telegram (polling-based)
+- Slack (Socket Mode)
+- Discord (discord.py)
+
+### ✅ 工具（Tools）— 22 個
+**Execution**: bash (Docker sandbox)
+**Search**: search_web (DDGS via LLM-Router MCP), web_fetch
+**File**: file_read, file_write, file_list, file_delete
+**Memory**: memory_save, memory_search
+**Research**: research_start, research_status, experiment_record
+**Cron**: cron_add, cron_list, cron_delete
+**Image**: image_gen (Router /v1/images/generations)
+**Browser**: browser_navigate, browser_extract, browser_close
+**MultiAgent**: sessions_send, sessions_spawn, sessions_list
+
+### ✅ 安全層（NemoClaw Phase 4）
+- Blueprint 驗證 (Slack/Telegram)
+- EgressPolicy 白名單（5 條規則）
+- Docker 隔離 (network=none, read_only, tmpfs noexec)
+- seccomp + AppArmor
+
+### ✅ 可觀測性（Phase 7）
+- Structured JSON logging
+- Metrics endpoint (/admin/metrics)
+- Health check (/admin/health)
+- Request tracing
+
+### ✅ 技術面指標
+- **Tests**: 183 passed, 3 skipped, 0 failures
+- **Code Coverage**: All tools have unit tests
+- **Deployment**: Ready for Jetson Orin Nano Super (JetPack 6)
+- **Performance**: Memory optimized (context compaction, tmpfs isolation)
 
 ---
 
