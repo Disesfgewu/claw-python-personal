@@ -81,6 +81,7 @@ class DiscordConfig:
     token: str = ""
     stock_channel_id: int = 0
     morning_report_channel_id: int = 0
+    intent_model: str = "gemma3:27b"  # Model used for intent pre-classification and AI opinion
 
 
 @dataclass
@@ -146,6 +147,10 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
         "CLAW_PORT": ("gateway", "port"),
         "CLAW_AUTH_TOKEN": ("gateway", "auth_token"),
         "CLAW_GATEWAY_AUTH_TOKEN": ("gateway", "auth_token"),
+        "DISCORD_TOKEN": ("discord", "token"),
+        "TELEGRAM_TOKEN": ("telegram", "token"),
+        "SLACK_BOT_TOKEN": ("slack", "bot_token"),
+        "SLACK_APP_TOKEN": ("slack", "app_token"),
         "CLAW_DATA_DIR": None,
     }
 
@@ -160,6 +165,19 @@ def _apply_env_overrides(raw: dict[str, Any]) -> None:
                 continue
         section, key = path
         raw.setdefault(section, {})[key] = val
+
+    # 處理整數型的環境變數（Discord/Telegram channel IDs）
+    int_overrides = {
+        "DISCORD_CHANNEL_ID": ("discord", "stock_channel_id"),
+    }
+    for env_key, path in int_overrides.items():
+        val = os.getenv(env_key)
+        if val is not None:
+            try:
+                section, key = path
+                raw.setdefault(section, {})[key] = int(val)
+            except ValueError:
+                pass
 
     data_dir = os.getenv("CLAW_DATA_DIR")
     if data_dir:

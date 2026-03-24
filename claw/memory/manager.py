@@ -29,8 +29,15 @@ class MemoryManager:
         session_id: str | None = None,
         limit: int = 5,
         hybrid_weight: float = 0.7,  # vector weight; BM25 = 1 - hybrid_weight
+        use_cache: bool = True,
     ) -> list[dict]:
         """Hybrid search (RRF) + temporal decay."""
+        cache_key = f"{session_id or ''}:{query}:{limit}:{hybrid_weight}"
+        if use_cache:
+            cached = self.store._get_cached_results(cache_key)
+            if cached is not None:
+                return cached
+
         query_emb = await self._get_embedding(query)
 
         # Vector search
@@ -47,7 +54,10 @@ class MemoryManager:
         fused = self._fuse_results(vec_results, bm25_results, hybrid_weight)
         fused = self._apply_temporal_decay(fused)
 
-        return sorted(fused, key=lambda x: x["score"], reverse=True)[:limit]
+        results = sorted(fused, key=lambda x: x["score"], reverse=True)[:limit]
+        if use_cache:
+            self.store._set_cached_results(cache_key, results)
+        return results
 
     async def forget(self, memory_id: str) -> None:
         await self.store.delete(memory_id)
@@ -98,6 +108,6 @@ class MemoryManager:
                     created = created.replace(tzinfo=timezone.utc)
                 days_old = (now - created).total_seconds() / 86400
                 r["score"] *= math.exp(-decay_rate * days_old)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         return results

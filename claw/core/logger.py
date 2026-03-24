@@ -50,9 +50,17 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
         structlog.stdlib.add_log_level,
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.CallsiteParameterAdder(
+            parameters=[
+                structlog.processors.CallsiteParameter.MODULE,
+                structlog.processors.CallsiteParameter.FUNC_NAME,
+                structlog.processors.CallsiteParameter.LINENO,
+            ]
+        ),
         _add_session_context,
         _redact_processor,
         structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
     ]
 
     if fmt == "json":

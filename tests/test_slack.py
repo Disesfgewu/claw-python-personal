@@ -87,12 +87,19 @@ def test_slack_channel_mention_session_id():
 
 @pytest.mark.asyncio
 async def test_slack_on_mention_posts_to_gateway(monkeypatch):
-    lines = [
-        'data: {"choices":[{"delta":{"content":"hi"}}]}',
-        'data: {"choices":[{"delta":{"content":" there"}}]}',
-        'data: [DONE]',
-    ]
-    fake_client = FakeClient(lines)
+    class FakePostResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"choices": [{"message": {"content": "hi there"}}]}
+    class FakeClient:
+        def __init__(self):
+            self.calls = []
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, url, json=None, timeout=None):
+            self.calls.append({"url": url, "json": json})
+            return FakePostResponse()
+    fake_client = FakeClient()
     monkeypatch.setattr(slack_module.httpx, "AsyncClient", lambda: fake_client)
 
     ch = SlackChannel("xoxb", "xapp", base_url="http://base")
@@ -109,7 +116,7 @@ async def test_slack_on_mention_posts_to_gateway(monkeypatch):
     assert fake_client.calls[0]["url"] == "http://base/v1/chat/completions"
     assert fake_client.calls[0]["json"]["session_id"] == "agent:slack:channel:C111"
     assert fake_client.calls[0]["json"]["messages"] == [{"role": "user", "content": "ping"}]
-    assert fake_client.calls[0]["json"]["stream"] is True
+    assert fake_client.calls[0]["json"]["stream"] is False
     assert sent == [("C111", "hi there", None)]
 
 

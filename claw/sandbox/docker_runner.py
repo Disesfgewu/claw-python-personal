@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from typing import Any, cast
 
 from claw.core.config import get_config
 
@@ -130,7 +131,21 @@ class DockerRunner:
         cpus = float(getattr(cfg, "cpus", 1.5))
         tmp_size_mb = int(getattr(cfg, "tmp_size_mb", 128))
 
-        container = client.containers.run(
+        is_jetson = os.path.exists("/etc/nv_tegra_release") or os.getenv("JETSON_OPTIMIZED") == "1"
+        cpuset_cpus = None
+        log_config = None
+        if is_jetson:
+            cpuset_cpus = "0-3"
+            memory_mb = min(memory_mb, 1024)
+            tmp_size_mb = min(tmp_size_mb, 100)
+            if docker is not None:
+                d_any = cast(Any, docker)
+                log_config = d_any.types.LogConfig(
+                    type=d_any.types.LogConfig.types.JSON,
+                    config={"max-size": "10m", "max-file": "3"},
+                )
+
+        run_kwargs: dict[str, Any] = dict(
             image=cfg.image,
             command="/bin/bash",
             detach=True,
@@ -144,15 +159,22 @@ class DockerRunner:
             network_mode="none",
             read_only=True,
             tmpfs={
-                "/tmp": f"size={tmp_size_mb}m,noexec,nosuid",
+                "/tmp": f"size={tmp_size_mb}m,noexec,nosuid",  # nosec B108
                 "/run": "size=8m,noexec,nosuid",
-                "/var/tmp": "size=8m,noexec,nosuid",
+                "/var/tmp": "size=8m,noexec,nosuid",  # nosec B108
             },
             security_opt=security_opt,
             user="nobody",
             remove=False,
             labels={"claw.session_id": session_id},
         )
+        if cpuset_cpus:
+            run_kwargs["cpuset_cpus"] = cpuset_cpus
+        if log_config:
+            run_kwargs["log_config"] = log_config
+
+        container = client.containers.run(**run_kwargs)
+
         logger.info(
             f"sandbox created (hardened): {container.short_id} "
             f"mem={memory_mb}m cpus={cpus} "

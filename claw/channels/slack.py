@@ -3,13 +3,9 @@ from __future__ import annotations
 import json
 import logging
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-
-if TYPE_CHECKING:
-    from slack_bolt.async_app import AsyncApp
-    from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
 logger = logging.getLogger(__name__)
 
@@ -24,23 +20,24 @@ class SlackChannel:
         self.bot_token = bot_token
         self.app_token = app_token
         self.base_url = base_url.rstrip("/")
-        self.app: "AsyncApp | None" = None
-        self._socket_handler: "AsyncSocketModeHandler | None" = None
+        self.app: Any = None
+        self._socket_handler: Any = None
 
     async def start(self) -> None:
         try:
-            from slack_bolt.async_app import AsyncApp
-            from slack_bolt.adapter.socket_mode import AsyncSocketModeHandler
+            from slack_bolt.async_app import AsyncApp  # type: ignore
+            from slack_bolt.adapter.socket_mode import AsyncSocketModeHandler  # type: ignore
         except Exception as e:
             raise ImportError("slack-bolt not installed") from e
 
         self.app = AsyncApp(token=self.bot_token)
+        app_any = cast(Any, self.app)
 
-        @self.app.event("app_mention")
+        @app_any.event("app_mention")
         async def _handle_mention(event, say):
             await self._on_app_mention(event)
 
-        @self.app.event("message")
+        @app_any.event("message")
         async def _handle_message(event, say):
             if event.get("channel", "").startswith("D"):
                 await self._on_direct_message(event)
@@ -116,27 +113,24 @@ class SlackChannel:
         payload = {
             "session_id": session_id,
             "messages": [{"role": "user", "content": text}],
-            "stream": True,
+            "stream": False,
         }
-        chunks: list[str] = []
         async with httpx.AsyncClient() as client:
-            async with client.stream("POST", url, json=payload, timeout=30.0) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if not data or data == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    piece = delta.get("content")
-                    if piece:
-                        chunks.append(piece)
-        return "".join(chunks)
+            resp = await client.post(url, json=payload, timeout=30.0)
+            resp.raise_for_status()
+            result = resp.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if isinstance(content, list):
+                parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        text_part = part.get("text")
+                        if isinstance(text_part, str):
+                            parts.append(text_part)
+                    elif isinstance(part, str):
+                        parts.append(part)
+                content = "".join(parts)
+            return (content or "").strip()
 
     async def _send_response(self, channel: str, text: str, thread_ts: str | None = None) -> None:
         if not text:

@@ -58,7 +58,7 @@ class CompletionResponse:
 @dataclass
 class StreamChunk:
     content: str = ""
-    tool_call_delta: dict | None = None  # partial tool call
+    tool_call_delta: list | None = None  # partial tool call
     finish_reason: str | None = None
     usage: dict | None = None            # 最後一個 chunk 才有
 
@@ -86,24 +86,31 @@ class LLMRouterClient:
             raise LLMRouterError(str(e)) from e
 
     async def stream(self, req: CompletionRequest) -> AsyncIterator[StreamChunk]:
-        """串流回應，yield StreamChunk"""
-        payload = self._build_payload(req, stream=True)
+        """Pseudo-stream: perform a non-streaming request and yield a single chunk."""
         try:
-            async with self._client.stream(
-                "POST", "/v1/chat/completions", json=payload
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:].strip()
-                    if data == "[DONE]":
-                        break
+            resp = await self.complete(req)
+            tool_call_delta = None
+            if resp.tool_calls:
+                tool_call_delta = []
+                for idx, tc in enumerate(resp.tool_calls):
                     try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    yield self._parse_stream_chunk(chunk)
+                        args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                    except Exception:
+                        args_str = "{}"
+                    tool_call_delta.append({
+                        "index": idx,
+                        "id": tc.id,
+                        "function": {
+                            "name": tc.name,
+                            "arguments": args_str,
+                        },
+                    })
+            yield StreamChunk(
+                content=resp.content or "",
+                tool_call_delta=tool_call_delta,
+                finish_reason=resp.finish_reason,
+                usage=resp.usage,
+            )
         except httpx.HTTPError as e:
             raise LLMRouterError(str(e)) from e
 
@@ -238,8 +245,30 @@ class LLMRouterClient:
     def _parse_stream_chunk(self, data: dict) -> StreamChunk:
         choice = data["choices"][0]
         delta = choice.get("delta", {})
+
+        content = delta.get("content")
+        if content is None or content == "":
+            # Some providers send content under message for stream chunks
+            msg = choice.get("message", {})
+            content = msg.get("content", "")
+
+        if isinstance(content, list):
+            # Support content blocks: [{"type": "text", "text": "..."}]
+            parts = []
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        parts.append(text)
+                elif isinstance(part, str):
+                    parts.append(part)
+            content = "".join(parts)
+
+        if content is None:
+            content = ""
+
         return StreamChunk(
-            content=delta.get("content") or "",
+            content=content or "",
             tool_call_delta=delta.get("tool_calls"),
             finish_reason=choice.get("finish_reason"),
             usage=data.get("usage"),

@@ -50,12 +50,22 @@ async def lifespan(app: FastAPI):
     from claw.memory.sqlite_store import MemoryStore
     from claw.memory.manager import MemoryManager
 
-    # Memory 初始化
+    # Memory 初始化 — 先檢測 embedding 實際維度
     mem_db_path = os.path.join(
         os.path.dirname(storage.db_path),
         "memory.db"
     )
-    mem_store = MemoryStore(db_path=mem_db_path)
+
+    # 檢測 LLM Router 的 embedding 維度
+    actual_embedding_dim = 768  # 預設值
+    try:
+        test_emb = await llm.get_embedding("test")
+        actual_embedding_dim = len(test_emb)
+        logger.info(f"Detected embedding dimension: {actual_embedding_dim}")
+    except Exception as e:
+        logger.warning(f"Failed to detect embedding dimension: {e}, using default 768")
+
+    mem_store = MemoryStore(db_path=mem_db_path, embedding_dim=actual_embedding_dim)
     await mem_store.init()
     memory_manager = MemoryManager(store=mem_store, llm=llm)
     _mem_tools.set_memory_manager(memory_manager)
@@ -69,9 +79,10 @@ async def lifespan(app: FastAPI):
     # MCP Bridge 初始化（連接外部 MCP servers）
     from claw.tools.mcp_bridge import MCPBridge, MCPServerConfig, set_mcp_bridge
     mcp_bridge = MCPBridge()
-    if hasattr(cfg, "mcp") and cfg.mcp and hasattr(cfg.mcp, "servers"):
+    mcp_cfg = getattr(cfg, "mcp", None)
+    if mcp_cfg and getattr(mcp_cfg, "servers", None):
         mcp_server_configs = []
-        for s in (cfg.mcp.servers or []):
+        for s in (getattr(mcp_cfg, "servers", [])):
             if isinstance(s, dict) and s.get("enabled", True):
                 mcp_server_configs.append(MCPServerConfig(
                     name=s.get("name", "unknown"),
@@ -84,6 +95,7 @@ async def lifespan(app: FastAPI):
             count = await mcp_bridge.load_servers(mcp_server_configs)
             logger.info(f"MCPBridge loaded {count} tools from {len(mcp_server_configs)} servers")
     set_mcp_bridge(mcp_bridge)
+    gateway_module.mcp_bridge = mcp_bridge
 
     # CronService 初始化
     from claw.cron.store import CronStore
@@ -94,7 +106,46 @@ async def lifespan(app: FastAPI):
     cron_service = CronService(store=cron_store, storage=storage, llm=llm)
     await cron_service.start()
     set_cron_service(cron_service)
+    gateway_module.cron_service = cron_service
     logger.info("CronService initialized and started")
+
+    # 晨報 Cron Job（每個交易日 08:00）
+    # Schedule: "0 8 * * 1-5" = 08:00, 週一至週五
+    morning_job = {
+        "name": "morning_report",
+        "schedule": "0 8 * * 1-5",
+        "prompt": "執行台股晨報：掃 Taiwan 50 強勢股，生成圖表，推送到 Discord",
+        "callable": "claw.cron.jobs.morning_report:morning_report_job",
+        "enabled": True,
+    }
+    try:
+        await cron_service.add_job(
+            session_id="cron:morning_report",
+            schedule=morning_job["schedule"],
+            prompt=morning_job["prompt"],
+        )
+        logger.info("Morning report Cron job registered (0 8 * * 1-5 / 08:00 weekdays)")
+    except Exception as e:
+        logger.warning(f"Failed to register morning report job: {e}")
+
+    # 週報 Cron Job（每週五 18:00）
+    # Schedule: "0 18 * * 5" = 18:00, 週五
+    weekly_job = {
+        "name": "weekly_report",
+        "schedule": "0 18 * * 5",
+        "prompt": "執行策略驗證週報：對比動能/反轉/基本面策略，生成推薦清單",
+        "callable": "claw.cron.jobs.weekly_report:weekly_report_job",
+        "enabled": True,
+    }
+    try:
+        await cron_service.add_job(
+            session_id="cron:weekly_report",
+            schedule=weekly_job["schedule"],
+            prompt=weekly_job["prompt"],
+        )
+        logger.info("Weekly report Cron job registered (0 18 * * 5 / 18:00 Friday)")
+    except Exception as e:
+        logger.warning(f"Failed to register weekly report job: {e}")
 
     # EgressPolicy 初始化（從 config/egress_policy.yaml 載入白名單）
     from claw.tools.policy import EgressPolicy, set_egress_policy
@@ -196,6 +247,8 @@ async def lifespan(app: FastAPI):
                 discord = DiscordChannel(
                     token=cfg.discord.token.strip(),
                     base_url=f"http://localhost:{cfg.gateway.port}",
+                    router_url=cfg.llm_router.url,
+                    intent_model=cfg.discord.intent_model,
                 )
                 await discord.start()
                 channels.append(discord)
@@ -205,19 +258,45 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    logger.info("Starting graceful shutdown...")
+
+    try:
+        if hasattr(gateway_module, 'cron_service') and gateway_module.cron_service:
+            await gateway_module.cron_service.stop()
+            logger.info("CronService stopped")
+    except Exception as e:
+        logger.error(f"Error stopping CronService: {e}")
+
+    try:
+        if hasattr(gateway_module, 'mcp_bridge') and gateway_module.mcp_bridge:
+            await gateway_module.mcp_bridge.close_all()
+            logger.info("MCPBridge closed")
+    except Exception as e:
+        logger.error(f"Error closing MCPBridge: {e}")
+
+    try:
+        for channel in channels:
+            await channel.stop()
+        logger.info(f"All channels stopped ({len(channels)} channels)")
+    except Exception as e:
+        logger.error(f"Error stopping channels: {e}")
+
+    try:
+        await get_runner().destroy_all()
+        logger.info("Docker containers destroyed")
+    except Exception as e:
+        logger.error(f"Error destroying Docker containers: {e}")
+
+    try:
+        if hasattr(gateway_module, 'llm') and gateway_module.llm:
+            await gateway_module.llm.close()
+            logger.info("LLM client closed")
+    except Exception as e:
+        logger.error(f"Error closing LLM client: {e}")
+
     reaper.stop()
 
-    await cron_service.stop()
-    await mcp_bridge.close_all()
-
-    for channel in channels:
-        try:
-            await channel.stop()
-        except Exception as e:
-            logger.error(f"Error stopping channel: {e}")
-
-    await get_runner().destroy_all()
-    await llm.close()
+    logger.info("Graceful shutdown completed")
 
 
 gateway_module.app.router.lifespan_context = lifespan

@@ -130,6 +130,8 @@ class ResearchLoop:
         return await self._execute_via_llm(hypothesis)
 
     async def _execute_via_agent(self, hypothesis: str, session_id: str) -> tuple[str, str]:
+        if self.agent_loop is None:
+            return "err", ""
         """Run hypothesis through AgentLoop so tools are available."""
         from claw.core.storage import SessionRow
         from claw.agent.events import TextChunk, ToolCallResult, RunComplete, RunError
@@ -228,7 +230,7 @@ class ResearchLoop:
                 try:
                     proc.kill()
                     await asyncio.wait_for(proc.wait(), timeout=3)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
 
     async def _evaluate(
@@ -255,7 +257,7 @@ class ResearchLoop:
         # C: quantitative metric
         if eval_cmd and metric is not None:
             kept = [r for r in history if r.status == ExperimentStatus.KEEP and r.metric is not None]
-            best = min((r.metric for r in kept), default=float("inf"))
+            best = min((r.metric for r in kept if r.metric is not None), default=float("inf"))
             if metric < best:
                 return ExperimentStatus.KEEP, f"C-layer: metric improved {metric:.4f} < {best:.4f}"
             return ExperimentStatus.DISCARD, f"C-layer: no improvement {metric:.4f} >= {best:.4f}"

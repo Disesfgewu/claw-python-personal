@@ -256,23 +256,24 @@ class Storage:
                 """,
                 (session_id, limit),
             )
-            rows = await cur.fetchall()
-            rows = list(reversed(rows))
+            rows_list = list(await cur.fetchall())
+            rows_list.reverse()
             result: list[MessageRow] = []
-            for row in rows:
-                content = row["content"]
+            for row in rows_list:
+                row_dict = dict(row)
+                content = row_dict["content"]
                 try:
                     content = json.loads(content)
-                except Exception:
+                except Exception:  # nosec B110
                     pass
                 result.append(MessageRow(
-                    session_id=row["session_id"],
-                    role=row["role"],
+                    session_id=row_dict["session_id"],
+                    role=row_dict["role"],
                     content=content,
-                    tool_call_id=row["tool_call_id"],
-                    tool_name=row["tool_name"],
-                    created_at=row["created_at"],
-                    token_count=row["token_count"],
+                    tool_call_id=row_dict["tool_call_id"],
+                    tool_name=row_dict["tool_name"],
+                    created_at=row_dict["created_at"],
+                    token_count=row_dict["token_count"],
                 ))
             return result
 

@@ -19,3 +19,28 @@ build/
 *.egg
 
 .claude/
+
+# Runtime data (portfolio / watchlist state)
+data/
+
+# Test / CI artifacts
+.coverage
+htmlcov/
+coverage*.txt
+*_report.txt
+*_check*.txt
+*_diagnostic.txt
+asyncio_warnings.txt
+bandit_report.txt
+memory_tests.txt
+metrics_test.txt
+post_bandit.txt
+search_tests.txt
+s5_test_report.txt
+s6_*.txt
+test_report.txt
+fix_bandit.py
+pyright_*.txt
+
+# Temporary archive
+_archive/

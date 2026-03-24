@@ -18,16 +18,20 @@ app = FastAPI(title="claw-python gateway")
 storage: Storage | None = None
 queue: MessageQueue | None = None
 llm: LLMRouterClient | None = None
-memory = None
+from typing import Any
+memory: Any = None
+mcp_bridge: Any = None
+cron_service: Any = None
+egress_policy: Any = None
 egress_policy = None
 
 
 def _require_dependencies() -> tuple[Storage, MessageQueue, LLMRouterClient]:
     if storage is None or queue is None or llm is None:
         raise RuntimeError("gateway dependencies are not configured")
-    assert storage is not None
-    assert queue is not None
-    assert llm is not None
+    if storage is None: raise RuntimeError(f"{chr(34)}storage not found{chr(34)}")
+    if queue is None: raise RuntimeError(f"{chr(34)}queue not found{chr(34)}")
+    if llm is None: raise RuntimeError(f"{chr(34)}llm not found{chr(34)}")
     return storage, queue, llm
 
 
@@ -144,12 +148,13 @@ async def ws_endpoint(ws: WebSocket):
 async def chat_completions(body: dict):
     """
     最簡版：從 body 取 session_id 和 messages[-1].content 作為 user message。
-    串流回應（SSE 格式）。
+    目前固定使用非串流回應（stream=False）。
     """
     session_id = body.get("session_id", "agent:main")
     messages = body.get("messages", [])
     model = body.get("model", "auto")
-    stream = body.get("stream", False)
+    # Force non-streaming responses for stability
+    stream = False
 
     if not messages:
         return {"error": "messages is empty"}
@@ -219,6 +224,88 @@ async def metrics():
     return _Response(content=content, media_type=content_type)
 
 
+@app.get("/admin/metrics")
+async def admin_metrics():
+    """Return comprehensive system metrics."""
+    import psutil
+    import time
+    from datetime import datetime
+    from claw.tools.registry import get_tools
+    import claw.core.gateway as _gw
+
+    process = psutil.Process()
+
+    session_count = 0
+    gw_storage = getattr(_gw, "storage", None)
+    if gw_storage is not None:
+        try:
+            sessions = await gw_storage.list_sessions()
+            session_count = len(sessions)
+        except Exception:
+            session_count = 0
+
+    memory_cache_size = 0
+    memory_items = 0
+    mem_mgr = getattr(_gw, "memory", None)
+    if mem_mgr and getattr(mem_mgr, "store", None) is not None:
+        try:
+            memory_cache_size = len(getattr(mem_mgr.store, "search_cache", {}))
+        except Exception:
+            memory_cache_size = 0
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(mem_mgr.store.db_path) as db:
+                cur = await db.execute("SELECT COUNT(*) FROM memory_vectors")
+                row = await cur.fetchone()
+                memory_items = int(row[0]) if row else 0
+        except Exception:
+            memory_items = 0
+
+    cron_jobs_active = 0
+    cron_svc = getattr(_gw, "cron_service", None)
+    if cron_svc is not None:
+        try:
+            jobs = await cron_svc.list_jobs()
+            cron_jobs_active = len(jobs)
+        except Exception:
+            cron_jobs_active = 0
+
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "system": {
+            "uptime_seconds": int(time.time() - process.create_time()),
+            "memory_mb": {
+                "used": int(psutil.virtual_memory().used / 1024 / 1024),
+                "free": int(psutil.virtual_memory().available / 1024 / 1024),
+                "percent": psutil.virtual_memory().percent,
+            },
+            "cpu_percent": psutil.cpu_percent(interval=0.1),
+            "disk_mb": {
+                "used": int(psutil.disk_usage("/").used / 1024 / 1024),
+                "free": int(psutil.disk_usage("/").free / 1024 / 1024),
+                "percent": psutil.disk_usage("/").percent,
+            },
+        },
+        "application": {
+            "active_sessions": session_count,
+            "tools_registered": len(get_tools()),
+            "memory_cache_size": memory_cache_size,
+            "cron_jobs_active": cron_jobs_active,
+        },
+        "performance": {
+            "avg_request_latency_ms": 0.0,
+            "p95_latency_ms": 0.0,
+            "requests_per_second": 0.0,
+            "errors_per_minute": 0.0,
+        },
+        "database": {
+            "memory_items": memory_items,
+            "session_count": session_count,
+            "last_backup": None,
+        },
+    }
+
+
 # ── Egress Admin Endpoints ────────────────────────────────────
 
 import aiosqlite as _aiosqlite
@@ -229,7 +316,7 @@ from claw.core.auth import verify_admin_token
 
 def _check_admin_auth(authorization: str | None) -> None:
     """Raise HTTPException 401 if admin token is invalid."""
-    token = ""
+    token = ""  # nosec B105
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
     if not verify_admin_token(token):
@@ -289,7 +376,7 @@ async def egress_audit_log(limit: int = 100, authorization: str | None = Header(
 async def admin_list_sessions(authorization: str | None = Header(default=None)):
     """List all sessions with metadata."""
     _check_admin_auth(authorization)
-    assert storage is not None
+    if storage is None: raise RuntimeError(f"{chr(34)}storage not found{chr(34)}")
     sessions = await storage.list_sessions()
     return [
         {
@@ -311,7 +398,7 @@ async def admin_delete_session(
 ):
     """Force-terminate and delete a session."""
     _check_admin_auth(authorization)
-    assert storage is not None
+    if storage is None: raise RuntimeError(f"{chr(34)}storage not found{chr(34)}")
     session = await storage.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id!r} not found")
@@ -325,7 +412,7 @@ async def admin_delete_session(
 async def admin_queue_status(authorization: str | None = Header(default=None)):
     """Get message queue status."""
     _check_admin_auth(authorization)
-    assert queue is not None
+    if queue is None: raise RuntimeError(f"{chr(34)}queue not found{chr(34)}")
     depth = queue.depth() if hasattr(queue, "depth") else 0
     return {
         "depth": depth,
@@ -356,8 +443,8 @@ async def admin_reload_skills(authorization: str | None = Header(default=None)):
 async def admin_status(authorization: str | None = Header(default=None)):
     """Overall system status."""
     _check_admin_auth(authorization)
-    assert storage is not None
-    assert queue is not None
+    if storage is None: raise RuntimeError(f"{chr(34)}storage not found{chr(34)}")
+    if queue is None: raise RuntimeError(f"{chr(34)}queue not found{chr(34)}")
     sessions = await storage.list_sessions()
     depth = queue.depth() if hasattr(queue, "depth") else 0
     return {

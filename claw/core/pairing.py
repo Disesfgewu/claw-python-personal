@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import random
+import secrets
 import time
 from dataclasses import dataclass
 
@@ -20,7 +20,7 @@ _paired: set[str] = set()
 
 def generate_code(session_id: str) -> str:
     """產生一個 6 位數配對碼，並暫存"""
-    code = str(random.randint(100000, 999999))
+    code = str(100000 + secrets.randbelow(900000))
     _pending[session_id] = PairingEntry(code=code, created_at=time.time())
     return code
 

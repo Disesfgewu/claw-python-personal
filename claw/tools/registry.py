@@ -73,14 +73,12 @@ async def execute(
     if spec.requires_main and not session_is_main:
         return f"Error: tool '{name}' requires main session"
     try:
-        if name == "bash":
-            from claw.sandbox.policy import needs_sandbox
-            if needs_sandbox(session_id):
-                from claw.sandbox.docker_runner import get_runner
-                command = arguments.get("command", "")
-                timeout = arguments.get("timeout")
-                result = await get_runner().run(session_id, command, timeout=timeout)
-                return str(result)
+        # Inject session_id into arguments if the handler function signature accepts it.
+        # This makes context available to tools without relying on the LLM to provide it.
+        import inspect
+        sig = inspect.signature(spec.handler)
+        if 'session_id' in sig.parameters:
+            arguments['session_id'] = session_id
 
         result = await spec.handler(**arguments)
         return str(result)

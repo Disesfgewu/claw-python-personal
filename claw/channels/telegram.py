@@ -3,13 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
-
-if TYPE_CHECKING:
-    from telegram import Update
-    from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +24,7 @@ class TelegramChannel:
 
     async def start(self) -> None:
         try:
-            from telegram.ext import Application, MessageHandler, filters
+            from telegram.ext import Application, MessageHandler, filters  # type: ignore
         except Exception as e:
             raise ImportError("python-telegram-bot not installed") from e
 
@@ -59,7 +55,7 @@ class TelegramChannel:
         await self.app.stop()
         await self.app.shutdown()
 
-    async def on_message(self, update: "Update", context: "ContextTypes.DEFAULT_TYPE") -> None:
+    async def on_message(self, update: Any, context: Any) -> None:
         if not update or not update.message:
             return
         text = update.message.text
@@ -82,7 +78,7 @@ class TelegramChannel:
             logger.error(f"Unexpected error in telegram handler", exc_info=True)
             await self._send_response(chat_id, "Error: Internal server error")
 
-    def _get_session_id(self, update: "Update") -> str:
+    def _get_session_id(self, update: Any) -> str:
         if update.message.chat.type == "private":
             return f"agent:tg:user:{update.message.from_user.id}"
         return f"agent:tg:group:{update.message.chat.id}"
@@ -92,27 +88,24 @@ class TelegramChannel:
         payload = {
             "session_id": session_id,
             "messages": [{"role": "user", "content": text}],
-            "stream": True,
+            "stream": False,
         }
-        chunks: list[str] = []
         async with httpx.AsyncClient() as client:
-            async with client.stream("POST", url, json=payload, timeout=30.0) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if not data or data == "[DONE]":
-                        continue
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    piece = delta.get("content")
-                    if piece:
-                        chunks.append(piece)
-        return "".join(chunks)
+            resp = await client.post(url, json=payload, timeout=30.0)
+            resp.raise_for_status()
+            result = resp.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if isinstance(content, list):
+                parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        text_part = part.get("text")
+                        if isinstance(text_part, str):
+                            parts.append(text_part)
+                    elif isinstance(part, str):
+                        parts.append(part)
+                content = "".join(parts)
+            return (content or "").strip()
 
     async def _send_response(self, chat_id: int, text: str) -> None:
         if not text:

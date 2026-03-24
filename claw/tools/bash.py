@@ -1,5 +1,6 @@
 import asyncio
 from .registry import tool
+from claw.sandbox.policy import needs_sandbox
 
 
 @tool(
@@ -22,8 +23,15 @@ from .registry import tool
     },
     requires_main=False,   # sandbox 後開放給所有 session
 )
-async def bash_tool(command: str, timeout: int = 30) -> str:
+async def bash_tool(command: str, timeout: int = 30, session_id: str = "agent:main") -> str:
+    if needs_sandbox(session_id):
+        from claw.sandbox.docker_runner import get_runner
+        runner = get_runner()
+        # The runner returns a string which is what we want.
+        return await runner.run(session_id, command, timeout=timeout)
+
     try:
+        # Host execution for main session
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,

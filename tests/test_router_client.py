@@ -43,16 +43,12 @@ async def test_complete():
 async def test_stream_parsing():
     client = LLMRouterClient(base_url="http://test")
 
-    data1 = {"choices": [{"delta": {"content": "he"}}]}
-    data2 = {"choices": [{"delta": {"content": "llo"}}], "usage": {"input": 1}}
-    body = "".join([
-        f"data: {json.dumps(data1)}\n\n",
-        f"data: {json.dumps(data2)}\n\n",
-        "data: [DONE]\n\n",
-    ])
-
     respx.post("http://test/v1/chat/completions").mock(
-        return_value=httpx.Response(200, content=body.encode("utf-8"))
+        return_value=httpx.Response(200, json={
+            "choices": [{"message": {"content": "hello", "role": "assistant"}}],
+            "model": "auto",
+            "usage": {"input": 1}
+        })
     )
 
     req = CompletionRequest(messages=[ChatMessage(role="user", content="hi")])
@@ -70,32 +66,16 @@ async def test_stream_parsing():
 async def test_stream_tool_call_delta():
     client = LLMRouterClient(base_url="http://test")
 
-    data1 = {
-        "choices": [{
-            "delta": {
-                "tool_calls": [
-                    {"index": 0, "id": "c1", "function": {"name": "bash", "arguments": "{\"cmd\":"}}
-                ]
-            }
-        }]
-    }
-    data2 = {
-        "choices": [{
-            "delta": {
-                "tool_calls": [
-                    {"index": 0, "function": {"arguments": "\"ls\"}"}}
-                ]
-            }
-        }]
-    }
-    body = "".join([
-        f"data: {json.dumps(data1)}\n\n",
-        f"data: {json.dumps(data2)}\n\n",
-        "data: [DONE]\n\n",
-    ])
-
     respx.post("http://test/v1/chat/completions").mock(
-        return_value=httpx.Response(200, content=body.encode("utf-8"))
+        return_value=httpx.Response(200, json={
+            "choices": [{
+                "message": {
+                    "content": "", "role": "assistant",
+                    "tool_calls": [{"id": "c1", "function": {"name": "bash", "arguments": "{\"cmd\":\"ls\"}"}}]
+                }
+            }],
+            "model": "auto"
+        })
     )
 
     req = CompletionRequest(messages=[ChatMessage(role="user", content="hi")])

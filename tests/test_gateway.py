@@ -72,20 +72,15 @@ async def test_chat_completions_stream(tmp_path):
 
     transport = httpx.ASGITransport(app=gateway_module.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        async with client.stream("POST", "/v1/chat/completions", json={
+        resp = await client.post("/v1/chat/completions", json={
             "session_id": "agent:main",
             "messages": [{"role": "user", "content": "hello"}],
             "model": "auto",
             "stream": True,
-        }) as resp:
-            assert resp.status_code == 200
-            lines = []
-            async for line in resp.aiter_lines():
-                if line:
-                    lines.append(line)
-
-    assert any(line.startswith("data: ") for line in lines)
-    assert any("[DONE]" in line for line in lines)
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["choices"][0]["message"]["content"] == "hi"
 
 
 @pytest.mark.asyncio

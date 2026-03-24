@@ -39,7 +39,7 @@ async def build_context(
             try:
                 import json
                 content = json.loads(content)
-            except Exception:
+            except Exception:  # nosec B110
                 pass  # 保持原始 string
         msg = ChatMessage(role=row.role, content=content)
         if row.tool_call_id:

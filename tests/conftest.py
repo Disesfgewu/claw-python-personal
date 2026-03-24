@@ -23,6 +23,7 @@ def client():
 
     # Set up minimal mock dependencies so the gateway is usable in tests
     mock_storage = MagicMock(spec=Storage)
+    mock_storage.db_path = "/tmp/test_claw_mock.db"
     mock_storage.list_sessions = AsyncMock(return_value=[])
     mock_storage.get_session = AsyncMock(return_value=None)
     mock_storage.delete_session = AsyncMock()

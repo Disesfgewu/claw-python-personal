@@ -4,6 +4,7 @@ import json
 import struct
 import aiosqlite
 import sqlite_vec
+from datetime import datetime, timedelta
 
 from claw.core.storage import now_iso
 
@@ -12,6 +13,23 @@ class MemoryStore:
     def __init__(self, db_path: str, embedding_dim: int = 768):
         self.db_path = db_path
         self.embedding_dim = embedding_dim
+        self.search_cache: dict[str, tuple[datetime, list[dict]]] = {}
+        self.cache_ttl_seconds = 300
+
+    def _get_cached_results(self, cache_key: str) -> list[dict] | None:
+        if cache_key not in self.search_cache:
+            return None
+        cached_time, cached_results = self.search_cache[cache_key]
+        if datetime.now() - cached_time < timedelta(seconds=self.cache_ttl_seconds):
+            return cached_results
+        self.search_cache.pop(cache_key, None)
+        return None
+
+    def _set_cached_results(self, cache_key: str, results: list[dict]) -> None:
+        self.search_cache[cache_key] = (datetime.now(), results)
+
+    def clear_cache(self) -> None:
+        self.search_cache.clear()
 
     async def init(self) -> None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -41,6 +59,19 @@ class MemoryStore:
                 CREATE INDEX IF NOT EXISTS idx_memory_session
                 ON memory_vectors(session_id)
             """)
+
+            # Check if existing memory_vec table has a different dimension
+            async with db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_vec'"
+            ) as cur:
+                row = await cur.fetchone()
+
+            if row and f"float[{self.embedding_dim}]" not in (row[0] or ""):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Recreating memory_vec with dimension={self.embedding_dim}")
+                await db.execute("DROP TABLE IF EXISTS memory_vec")
+
             # vec0 virtual table for ANN
             await db.execute(
                 f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec USING vec0("
@@ -55,6 +86,7 @@ class MemoryStore:
         embedding: list[float],
         metadata: dict | None,
     ) -> str:
+        self.clear_cache()
         memory_id = str(uuid.uuid4())
         created_at = now_iso()
         meta_json = json.dumps(metadata) if metadata else None
@@ -152,6 +184,15 @@ class MemoryStore:
         self, query: str, session_id: str | None, limit: int
     ) -> list[dict]:
         """BM25 full-text search."""
+        import re
+        # Skip FTS entirely for non-ASCII queries (Chinese etc.) — vector search handles them
+        if not query.isascii():
+            return []
+        # Sanitize to remove FTS5 special chars (dots, dashes, operators)
+        query = re.sub(r'[<>()@\[\]*^",:?!.\-]', ' ', query).strip()
+        if not query:
+            return []
+
         sql = """
             SELECT f.memory_id as id, v.content, v.created_at, (-f.rank) as score
             FROM memory_fts f
@@ -181,6 +222,7 @@ class MemoryStore:
         ]
 
     async def delete(self, memory_id: str) -> None:
+        self.clear_cache()
         async with aiosqlite.connect(self.db_path) as db:
             await db.enable_load_extension(True)
             await db.load_extension(sqlite_vec.loadable_path())
